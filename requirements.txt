@@ -1,0 +1,23 @@
+# Runtime and development dependencies.
+#
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+#   playwright install chromium
+#
+# Equivalent to `pip install -e '.[dev]'` — pyproject.toml is the source of truth for the
+# package itself; this file exists so a reviewer can get running without reading it.
+
+anthropic>=0.68,<1
+fastapi>=0.115,<1
+jinja2>=3.1,<4
+playwright>=1.55,<2
+pydantic>=2.11,<3
+python-multipart>=0.0.20,<1
+pyyaml>=6.0,<7
+uvicorn[standard]>=0.35,<1
+
+# Development
+httpx>=0.28,<1
+pytest>=8.4,<9
+pytest-asyncio>=1.1,<2
+ruff>=0.12,<1
