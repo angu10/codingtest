@@ -380,6 +380,6 @@ they reach the log.
 make verify
 ```
 
-Lint, the full suite, and schema generation. Expect `82 passed`. The suite runs with
+Lint, the full suite, and schema generation. Expect `83 passed`. The suite runs with
 `ANTHROPIC_API_KEY` removed from the environment, which is how "no model in replay" is checked
 rather than asserted.

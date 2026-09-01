@@ -52,7 +52,7 @@ key from a committed file.
 make verify                        # lint, the full suite, and schema generation
 ```
 
-Expect `All checks passed!` and `82 passed`. No network, no API key, no browser window.
+Expect `All checks passed!` and `83 passed`. No network, no API key, no browser window.
 
 ## The target application
 
@@ -229,5 +229,5 @@ src/interface_cua/
 demo_app/       Meridian CU, the target application
 artifacts/      capabilities, and the generated JSON Schema
 evidence/       logs and traces from real runs
-tests/          82 tests, none of which need an API key
+tests/          83 tests, none of which need an API key
 ```
