@@ -230,6 +230,8 @@ docs
 # Secrets. `.env` above matches that exact name only, which would let
 # `.env.local` or `.env.backup` through.
 .env*
+# ...but the template carries no secret and has to ship.
+!.env.example
 *.key
 *.pem
 *.p12

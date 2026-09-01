@@ -43,8 +43,15 @@ active. Every `make` target uses the `python` on your PATH; override with `make 
 without one. `make test` removes `ANTHROPIC_API_KEY` from the environment before running, which is
 how the "no model in replay" claim is checked rather than just asserted.
 
-For discovery, put the key in a `.env` file at the repo root — it is gitignored, and nothing reads a
-key from a committed file.
+For discovery, copy the template and fill in your key. `.env` is gitignored, and nothing reads a key
+from a committed file.
+
+```bash
+cp .env.example .env
+```
+
+`.env.example` also documents `ANTHROPIC_WORKSPACE_ID`, which only matters if your key is
+identity-linked rather than organisation-scoped. Ordinary keys need nothing but the key.
 
 ## Quick check
 
