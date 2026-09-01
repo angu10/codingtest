@@ -214,7 +214,7 @@ async def discover(args: argparse.Namespace) -> int:
         inputs=inputs,
         application_family=args.family,
         application_version=args.app_version,
-        entry_landmarks=args.landmark or ["Member Search"],
+        entry_landmarks=args.landmark,
         model_id=MODEL_ID,
         operator=args.operator,
     )
@@ -232,10 +232,17 @@ def build_parser() -> argparse.ArgumentParser:
     find.add_argument("--input", action="append", default=[], metavar="NAME=VALUE")
     find.add_argument("--out", type=Path, required=True, help="Where to write the artifact.")
     find.add_argument("--capability-id", default="discovered-capability")
+    # Defaults point at the bundled demo app for convenience; every one is overridable, and
+    # nothing under src/ reads them.
     find.add_argument("--base-url", default="http://127.0.0.1:8000")
     find.add_argument("--family", default="meridian-cu")
     find.add_argument("--app-version", default="demo-v1")
-    find.add_argument("--landmark", action="append", default=[])
+    find.add_argument(
+        "--landmark",
+        action="append",
+        required=True,
+        help="Text that must be visible on the entry screen. Repeatable. App-specific by nature.",
+    )
     find.add_argument("--evidence", type=Path, default=Path("evidence"))
     find.add_argument("--run-id", default=None)
     find.add_argument("--operator", default="discovery-cli")

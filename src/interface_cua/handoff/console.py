@@ -21,7 +21,7 @@ from interface_cua.handoff.intervention import HandoffCoordinator
 CONSOLE_PORT = 8765
 
 _PAGE = """<!doctype html><html><head><meta charset="utf-8">
-<title>Operator console — Meridian CU</title>
+<title>Operator console</title>
 <meta http-equiv="refresh" content="3">
 <style>
  body{{font:15px/1.5 -apple-system,system-ui,sans-serif;margin:0;background:#f5f6f7;color:#18202a}}
