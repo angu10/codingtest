@@ -76,6 +76,32 @@ are non-zero — `needs_human` is `2`, `unknown_side_effect` is `3`, `validation
 `make replay` passes `--allow-draft`, because the checked-in artifact is still `draft`. Drop the
 flag and replay refuses to start with `validation_required` / `check: approval`.
 
+## Discovery and handoff
+
+Discovery is the only path that needs `ANTHROPIC_API_KEY` (put it in `.env`; it is gitignored):
+
+```bash
+python -m interface_cua.cli discover \
+  --goal 'For member 58431, open the savings sub-account form. Return the member name
+          and the current balance of the Savings Account.' \
+  --input member_id=58431 --out artifacts/discovered.yaml --landmark 'Member Search'
+```
+
+The model drives the app visually; the recorder resolves each click to a semantic target; the
+compiler parameterises the trace. What comes out replays with **no model at all**.
+
+Escalation runs on the same live browser — no co-browsing, no remote desktop:
+
+```bash
+python -m interface_cua.cli replay artifacts/open-sub-account-review-v1.yaml \
+  --input member_id=55503 --input account_type=savings --allow-draft --headed --handoff
+```
+
+Replay stops on the declared `SESSION_EXPIRED` escalation, the lease moves to `HUMAN`, and the
+operator console opens at <http://127.0.0.1:8765>. You drive the actual window — same cookies,
+same session — and every action you take is captured with values masked *inside the page*. On
+Resume the step re-verifies its own precondition; clicking Resume is not authority to continue.
+
 The checked-in artifact remains `draft` because it was manually bootstrapped, not produced by a
 completed discovery run. Normal replay rejects draft artifacts; automated development tests use an
 explicit `allow_draft=True` override.

@@ -90,11 +90,74 @@ async def replay(args: argparse.Namespace) -> ReplayResult:
         )
         try:
             result = await executor.execute(artifact, arguments)
+            if result.status == "needs_human" and args.handoff:
+                result = await _handoff(
+                    artifact, arguments, result, surface, page, executor, evidence, args
+                )
         finally:
             await browser.close()
         if evidence is not None:
             print(f"evidence: {evidence.dir}", file=sys.stderr)
         return result
+
+
+async def _handoff(artifact, arguments, result, surface, page, executor, evidence, args):
+    """Escalate to a human on the same live session, then resume if they say so.
+
+    The operator drives the actual browser window — same cookies, same session — so `--headed` is
+    what makes this usable. The console only shows why we stopped and takes the decision.
+    """
+
+    import uvicorn
+
+    from interface_cua.handoff.console import CONSOLE_PORT, build_console
+    from interface_cua.handoff.intervention import HandoffCoordinator
+
+    if evidence is None:
+        evidence = EvidenceWriter(Path("evidence"), f"handoff_{artifact.capability.id}")
+
+    coordinator = HandoffCoordinator(
+        lease=surface.lease,
+        surface=surface,
+        page=page,
+        evidence=evidence,
+        sensitive_fields=frozenset(spec.name for spec in artifact.inputs if spec.sensitive),
+    )
+    await coordinator.raise_request(
+        run_id=evidence.run_id,
+        capability_id=artifact.capability.id,
+        step_id=result.step,
+        reason=result.reason,
+    )
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_console(coordinator), host="127.0.0.1", port=CONSOLE_PORT, log_level="warning"
+        )
+    )
+    serving = asyncio.create_task(server.serve())
+    print(
+        f"\nescalated at step {result.step}: {result.reason}\n"
+        f"operator console: http://127.0.0.1:{CONSOLE_PORT}\n"
+        f"take over the browser window, then choose Resume or Abort.\n",
+        file=sys.stderr,
+    )
+    try:
+        await coordinator.decided.wait()
+    finally:
+        server.should_exit = True
+        await serving
+
+    request = coordinator.request
+    for action in request.human_actions if request else []:
+        print(f"  human: {action.describe()}", file=sys.stderr)
+
+    if coordinator.decision != "resume":
+        return result
+    coordinator.confirm_resume()
+    # The resumed step re-checks its own precondition; the operator clicking Resume is not
+    # sufficient authority to continue.
+    return await executor.execute(artifact, arguments, resume_from=result.step)
 
 
 async def discover(args: argparse.Namespace) -> int:
@@ -210,6 +273,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write events.jsonl, screenshots, a Playwright trace, and a failure bundle under DIR.",
     )
     run.add_argument("--run-id", default=None, help="Name the run directory (default: timestamped).")
+    run.add_argument(
+        "--handoff",
+        action="store_true",
+        help="On needs_human, open the operator console and wait for a decision. Use with --headed.",
+    )
     return run.set_defaults(handler=replay) or parser
 
 

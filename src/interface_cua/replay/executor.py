@@ -84,10 +84,20 @@ class ReplayExecutor:
         arguments: dict[str, object],
         *,
         confirmed_steps: frozenset[str] = frozenset(),
+        resume_from: str | None = None,
+        known_outputs: dict[str, Any] | None = None,
     ) -> ReplayResult:
-        """Run the capability and, on any non-success terminal state, leave a failure bundle."""
+        """Run the capability and, on any non-success terminal state, leave a failure bundle.
 
-        result = await self._execute(artifact, arguments, confirmed_steps)
+        `resume_from` restarts at a named step after a human held the session. It is not a "skip
+        ahead" switch: the resumed step verifies its own precondition like any other, so a human
+        who left the session somewhere unexpected stops the run instead of silently continuing
+        from a step number that no longer means anything.
+        """
+
+        result = await self._execute(
+            artifact, arguments, confirmed_steps, resume_from, known_outputs or {}
+        )
         if self.evidence is None:
             return result
         bundle = await self.evidence.capture_failure(self.surface, result)
@@ -100,8 +110,13 @@ class ReplayExecutor:
         artifact: Capability,
         arguments: dict[str, object],
         confirmed_steps: frozenset[str],
+        resume_from: str | None = None,
+        known_outputs: dict[str, Any] | None = None,
     ) -> ReplayResult:
-        validation = await self._validate_artifact(artifact)
+        # Entry checks are exactly that. On a resume the session is deliberately mid-flow, so
+        # re-asserting the entry route and landmarks would fail every resume — and would mask the
+        # precondition check that is the real gate on whether a human left things usable.
+        validation = await self._validate_artifact(artifact, entry_checks=resume_from is None)
         if validation is not None:
             return validation
         try:
@@ -115,8 +130,21 @@ class ReplayExecutor:
                 observed=str(exc),
             )
 
-        outputs: dict[str, Any] = {}
-        for index, step in enumerate(artifact.steps):
+        outputs: dict[str, Any] = dict(known_outputs or {})
+        steps = artifact.steps
+        if resume_from is not None:
+            names = [step.id for step in steps]
+            if resume_from not in names:
+                return FailureResult(
+                    category=FailureCategory.PRECONDITION_FAILED,
+                    retryable=False,
+                    step=resume_from,
+                    expected=f"a step of {artifact.capability.id}",
+                    observed=f"no such step; declared steps are {names}",
+                )
+            steps = steps[names.index(resume_from) :]
+
+        for index, step in enumerate(steps):
             result = await self._run_step_with_retry(
                 artifact, step, inputs, confirmed_steps, index
             )
@@ -429,7 +457,9 @@ class ReplayExecutor:
             outputs[output.name] = value
         return None
 
-    async def _validate_artifact(self, artifact: Capability) -> ValidationRequiredResult | None:
+    async def _validate_artifact(
+        self, artifact: Capability, *, entry_checks: bool = True
+    ) -> ValidationRequiredResult | None:
         """Refuse to start unless this really is the approved capability on the expected app.
 
         The family/version pair is what the caller *asserts*; the route and landmark checks are
@@ -462,6 +492,9 @@ class ReplayExecutor:
                     "version": self.application_version,
                 },
             )
+
+        if not entry_checks:
+            return None
 
         entry_url = self.surface.current_url
         if not any(route_match(pattern, entry_url) for pattern in app.fingerprint.route_patterns):
