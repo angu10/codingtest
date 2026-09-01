@@ -219,4 +219,38 @@ __marimo__/
 
 
 .claude
+
+# Build spec, demo script, and interview prep. Scaffolding, not a deliverable.
 docs
+
+# macOS
+.DS_Store
+
+
+# Secrets. `.env` above matches that exact name only, which would let
+# `.env.local` or `.env.backup` through.
+.env*
+*.key
+*.pem
+*.p12
+credentials.json
+secrets.*
+
+# Editor and OS state
+.idea/
+.vscode/
+*.swp
+.DS_Store?
+._*
+
+# Written by the runbook's discovery command; reviewers generate their own.
+# `artifacts/discovered-open-sub-account-v1.yaml` is the committed exemplar.
+artifacts/discovered-demo.yaml
+
+
+# Local scratch
+NOTES.md
+TODO.md
+scratch/
+tmp/
+*.local.*
