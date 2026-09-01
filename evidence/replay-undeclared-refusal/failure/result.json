@@ -1,0 +1,9 @@
+{
+  "category": "postcondition_failed",
+  "expected": "one of the declared postconditions: member-found, member-not-found, member-restricted, session-expired",
+  "locator_attempts": [],
+  "observed": "MERIDIAN CU \u00a0 Servicing Console\nMember Detail\nMember\tDrew Entitlement\nReference\t\u2022\u2022\u20225506\nDate of birth\t1983-09-27\nSSN\t***0006\n\nPermission denied\n\nYour operator role lacks the servicing entitlement.",
+  "retryable": false,
+  "status": "failure",
+  "step": "search-member"
+}

@@ -17,6 +17,14 @@ TEMPLATES = Jinja2Templates(directory=Path(__file__).parent / "templates")
 app = FastAPI(title="Meridian CU Servicing Console")
 app.state.detail_delay_seconds = 6.0
 
+#: Messages the form prints beside the offending field. A capability declares the exact text; the
+#: executor never interprets it.
+NEGATIVE_DEPOSIT = "Opening deposit cannot be negative."
+UNPARSEABLE_DEPOSIT = "Opening deposit must be an amount, for example 250.00."
+
+#: What an untouched form shows.
+_EMPTY_FORM = {"account_type": "savings", "nickname": "", "opening_deposit": "0.00"}
+
 
 @app.get("/", response_class=HTMLResponse)
 async def member_search(request: Request) -> HTMLResponse:
@@ -104,7 +112,12 @@ async def sub_account_form(request: Request, member_id: str, account_id: str) ->
     return TEMPLATES.TemplateResponse(
         request,
         "sub_account_form.html",
-        {"member": member, "member_id": member_id, "account": account},
+        {
+            "member": member,
+            "member_id": member_id,
+            "account": account,
+            "submitted": _EMPTY_FORM,
+        },
     )
 
 
@@ -119,18 +132,37 @@ async def review_sub_account(
 ) -> HTMLResponse:
     member = _member_or_404(member_id)
     account = _account_or_404(member, account_id)
+    # The select offers only these two, so a bad value here did not come from the form.
     if account_type not in {"savings", "money_market"}:
         raise HTTPException(status_code=422, detail="Unsupported account type")
-    try:
-        deposit = Decimal(opening_deposit).quantize(Decimal("0.01"))
-    except InvalidOperation as exc:
-        raise HTTPException(status_code=422, detail="Invalid opening deposit") from exc
-    if deposit < 0:
-        raise HTTPException(status_code=422, detail="Opening deposit cannot be negative")
+
+    # A bad opening deposit *did* come from the form, so the console answers the way a servicing
+    # console does: it re-renders the page you were on, with a message beside the field and your
+    # values preserved. Replay therefore meets a screen a capability can declare, rather than a
+    # framework exception page it could only ever call a hard failure.
+    error = _deposit_error(opening_deposit)
+    if error is not None:
+        return TEMPLATES.TemplateResponse(
+            request,
+            "sub_account_form.html",
+            {
+                "member": member,
+                "member_id": member_id,
+                "account": account,
+                "error": error,
+                "submitted": {
+                    "account_type": account_type,
+                    "nickname": nickname[:40],
+                    "opening_deposit": opening_deposit,
+                },
+            },
+            status_code=422,
+        )
+
     review = {
         "account_type": account_type,
         "nickname": nickname[:40],
-        "opening_deposit": str(deposit),
+        "opening_deposit": str(Decimal(opening_deposit).quantize(Decimal("0.01"))),
     }
     return TEMPLATES.TemplateResponse(
         request,
@@ -175,6 +207,17 @@ async def list_sub_accounts(member_id: str) -> dict[str, object]:
 
     member = _member_or_404(member_id)
     return {"member_id": member_id, "sub_accounts": member["sub_accounts"]}
+
+
+def _deposit_error(raw: str) -> str | None:
+    """Field-level validation, phrased the way the screen phrases it."""
+
+    try:
+        deposit = Decimal(raw).quantize(Decimal("0.01"))
+    except InvalidOperation:
+        # Covers NaN and Infinity too: both parse as Decimal but fail to quantize.
+        return UNPARSEABLE_DEPOSIT
+    return NEGATIVE_DEPOSIT if deposit < 0 else None
 
 
 def _member_or_404(member_id: str) -> dict[str, object]:

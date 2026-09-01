@@ -47,7 +47,9 @@ def click(x: int, y: int, tid: str = "t1") -> ModelAction:
     return ModelAction(kind="click", tool_use_id=tid, x=x, y=y)
 
 
-async def _run(demo_server, tmp_path, model, *, origins=None, max_steps=25, path="/"):
+async def _run(
+    demo_server, tmp_path, model, *, origins=None, max_steps=25, path="/", allow_pii=False
+):
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=True)
         page = await browser.new_page(viewport={"width": 1280, "height": 800})
@@ -59,7 +61,10 @@ async def _run(demo_server, tmp_path, model, *, origins=None, max_steps=25, path
             page=page,
             model=model,
             policy=PolicyEngine(
-                PolicyConfig(allowed_origins=frozenset(origins or {demo_server}))
+                PolicyConfig(
+                    allowed_origins=frozenset(origins or {demo_server}),
+                    allow_sensitive_extraction=allow_pii,
+                )
             ),
             evidence=evidence,
             goal="reach the sub-account review screen",
@@ -90,6 +95,79 @@ async def test_finish_ends_the_run_and_keeps_extracted_outputs(demo_server, tmp_
     assert run.detail == "review screen reached"
     assert set(run.outputs) == {"member_name"}
     assert run.outputs["member_name"].observed_value == "Morgan Chen"
+
+
+def _extract_ssn(tid: str = "e1") -> ModelAction:
+    """The 666-xx-xxxx block is never issued, so this is synthetic and still matches a detector."""
+
+    return ModelAction(kind="extract", tool_use_id=tid, output_name="ssn", text="666-19-4472")
+
+
+async def test_a_goal_that_asks_for_regulated_data_is_denied_and_produces_no_artifact(
+    demo_server, tmp_path: Path
+) -> None:
+    """Data egress is authorized like any other action, and it fails closed.
+
+    The model reached the value and asked to record it. Nothing about the *action* is unusual —
+    it is the value that makes it consequential, which is why the scan happens before policy is
+    asked rather than after the fact.
+    """
+
+    model = ScriptedModel(
+        [
+            _turn(_extract_ssn()),
+            _turn(ModelAction(kind="finish", tool_use_id="f1", reason="got it")),
+        ]
+    )
+    run, evidence = await _run(demo_server, tmp_path, model, path="/member/58431")
+
+    assert run.outcome is DiscoveryOutcome.POLICY_DENIED
+    assert run.detail == "policy DENY: extraction:sensitive_value"
+    # The run stopped at the extraction, so `finish` was never reached and nothing was recorded.
+    assert run.outputs == {}
+
+    # The value that triggered the refusal must not be in the log that records the refusal.
+    log = (evidence.dir / "events.jsonl").read_text(encoding="utf-8")
+    assert "666-19-4472" not in log
+    assert "extraction:sensitive_value" in log
+
+
+async def test_regulated_extraction_is_allowed_only_by_explicit_configuration(
+    demo_server, tmp_path: Path
+) -> None:
+    """A capability that legitimately needs an SSN is authored by someone who turned this on."""
+
+    model = ScriptedModel(
+        [
+            _turn(_extract_ssn()),
+            _turn(ModelAction(kind="finish", tool_use_id="f1", reason="got it")),
+        ]
+    )
+    run, _ = await _run(demo_server, tmp_path, model, path="/member/58431", allow_pii=True)
+
+    assert run.outcome is DiscoveryOutcome.FINISHED
+    assert run.outputs["ssn"].sensitive is True
+
+
+async def test_an_ordinary_value_is_not_treated_as_regulated(
+    demo_server, tmp_path: Path
+) -> None:
+    """The gate keys on the value, not on the action — a balance extracts normally."""
+
+    model = ScriptedModel(
+        [
+            _turn(
+                ModelAction(
+                    kind="extract", tool_use_id="e1", output_name="balance", text="9876.54"
+                )
+            ),
+            _turn(ModelAction(kind="finish", tool_use_id="f1", reason="done")),
+        ]
+    )
+    run, _ = await _run(demo_server, tmp_path, model, path="/member/58431")
+
+    assert run.outcome is DiscoveryOutcome.FINISHED
+    assert run.outputs["balance"].sensitive is False
 
 
 async def test_escalate_is_a_normal_outcome_not_an_error(demo_server, tmp_path: Path) -> None:

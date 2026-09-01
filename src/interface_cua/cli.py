@@ -14,14 +14,21 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from playwright.async_api import async_playwright
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import Page, async_playwright
 
 from interface_cua.handoff.lease import SessionLease
 from interface_cua.observability.evidence import EvidenceWriter
 from interface_cua.policy.engine import PolicyConfig, PolicyEngine
+from interface_cua.policy.redaction import Redactor
 from interface_cua.replay.executor import ReplayExecutor
 from interface_cua.schema.artifact import Capability, ValueType
-from interface_cua.schema.result import ReplayResult
+from interface_cua.schema.result import (
+    NeedsHumanResult,
+    ReplayResult,
+    ValidationCheck,
+    ValidationRequiredResult,
+)
 from interface_cua.surface.playwright_surface import VIEWPORT, PlaywrightSurface
 
 #: Exit codes are part of the contract: a declared business outcome is a successful invocation of
@@ -79,7 +86,19 @@ async def replay(args: argparse.Namespace) -> ReplayResult:
             )
             await surface.start_trace()
 
-        await page.goto(args.base_url)
+        # Every other terminal state in this system is typed and explains itself; an unreachable
+        # application must not be the one exception that arrives as a stack trace.
+        try:
+            await page.goto(args.base_url)
+        except PlaywrightError as exc:
+            await browser.close()
+            return ValidationRequiredResult(
+                check=ValidationCheck.ENTRY_ROUTE,
+                reason="the target application is not reachable",
+                expected={"base_url": args.base_url},
+                observed={"error": str(exc).splitlines()[0]},
+            )
+
         executor = ReplayExecutor(
             surface,
             PolicyEngine(PolicyConfig(allowed_origins=frozenset({args.base_url.rstrip("/")}))),
@@ -89,7 +108,9 @@ async def replay(args: argparse.Namespace) -> ReplayResult:
             evidence=evidence,
         )
         try:
-            result = await executor.execute(artifact, arguments)
+            result = await executor.execute(
+                artifact, arguments, confirmed_steps=frozenset(args.confirm)
+            )
             if result.status == "needs_human" and args.handoff:
                 result = await _handoff(
                     artifact, arguments, result, surface, page, executor, evidence, args
@@ -101,7 +122,16 @@ async def replay(args: argparse.Namespace) -> ReplayResult:
         return result
 
 
-async def _handoff(artifact, arguments, result, surface, page, executor, evidence, args):
+async def _handoff(
+    artifact: Capability,
+    arguments: dict[str, object],
+    result: NeedsHumanResult,
+    surface: PlaywrightSurface,
+    page: Page,
+    executor: ReplayExecutor,
+    evidence: EvidenceWriter | None,
+    args: argparse.Namespace,
+) -> ReplayResult:
     """Escalate to a human on the same live session, then resume if they say so.
 
     The operator drives the actual browser window — same cookies, same session — so `--headed` is
@@ -281,6 +311,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--run-id", default=None, help="Name the run directory (default: timestamped).")
     run.add_argument(
+        "--confirm",
+        action="append",
+        default=[],
+        metavar="STEP_ID",
+        help="Confirm a consequential step by name. Standing in for a human saying yes.",
+    )
+    run.add_argument(
         "--handoff",
         action="store_true",
         help="On needs_human, open the operator console and wait for a decision. Use with --headed.",
@@ -288,12 +325,37 @@ def build_parser() -> argparse.ArgumentParser:
     return run.set_defaults(handler=replay) or parser
 
 
+def _printable(
+    outcome: ReplayResult, artifact: Capability | None, arguments: dict[str, object]
+) -> dict[str, object]:
+    """The result as it goes to stdout, through the same redactor everything else uses.
+
+    stdout is an egress point like any other: it lands in a terminal, a CI log, or whatever called
+    us. The whole payload is redacted, not just `outputs` — a failure's `observed` field carries
+    whatever was on the screen, which is exactly where regulated data turns up uninvited. A caller
+    that genuinely needs a value reads it from the returned object; what gets *printed* is masked,
+    because printing is the part nobody controls.
+    """
+
+    payload = outcome.model_dump(mode="json")
+    if artifact is None:
+        return payload
+    declared = {item.name for item in artifact.inputs if item.sensitive}
+    declared |= {item.name for item in artifact.outputs if item.sensitive}
+    redactor = Redactor(
+        declared, sensitive_values=frozenset(str(value) for value in arguments.values())
+    )
+    return redactor.redact(payload).value
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     outcome = asyncio.run(args.handler(args))
     if getattr(args, "discovery", False):
         return int(outcome)
-    json.dump(outcome.model_dump(mode="json"), sys.stdout, indent=2)
+    artifact = Capability.from_yaml(args.artifact) if hasattr(args, "artifact") else None
+    arguments = _parse_inputs(args.input, artifact) if artifact is not None else {}
+    json.dump(_printable(outcome, artifact, arguments), sys.stdout, indent=2)
     sys.stdout.write("\n")
     return EXIT_CODES[outcome.status]
 

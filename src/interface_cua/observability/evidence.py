@@ -76,12 +76,15 @@ class EvidenceWriter:
         bundle = self.dir / FAILURE_BUNDLE
         bundle.mkdir(parents=True, exist_ok=True)
 
-        summary: dict[str, Any] = self.redactor.redact(
-            result.model_dump(mode="json", exclude_none=True)
-        ).value
+        # The bundle's `observed` field carries whatever was on the screen, so this is the one
+        # place stage-two masking earns its keep. The gap is still reported — masking the leak and
+        # hiding that our field schema missed it are different things.
+        redaction = self.redactor.redact(result.model_dump(mode="json", exclude_none=True))
         (bundle / "result.json").write_text(
-            json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(redaction.value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        if redaction.schema_gaps:
+            self.notice(NoticeKind.REDACTION_SCHEMA_GAP, kinds=list(redaction.schema_gaps))
 
         # Best-effort: a surface that cannot screenshot or snapshot must not turn a diagnosable
         # failure into an undiagnosable crash.
@@ -91,8 +94,10 @@ class EvidenceWriter:
         except Exception as exc:  # noqa: BLE001
             (bundle / "screenshot.error.txt").write_text(str(exc), encoding="utf-8")
         try:
+            # Through the same redactor as everything else. A DOM snapshot is the most direct copy
+            # of the screen we ever write, so it is the last place to make an exception for.
             (bundle / "dom_snapshot.html").write_text(
-                await surface.dom_snapshot(), encoding="utf-8"
+                str(self.redactor.redact(await surface.dom_snapshot()).value), encoding="utf-8"
             )
         except Exception as exc:  # noqa: BLE001
             (bundle / "dom_snapshot.error.txt").write_text(str(exc), encoding="utf-8")

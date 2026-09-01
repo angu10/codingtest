@@ -128,6 +128,14 @@ class NoticeKind(StrEnum):
     CONTENT_RISK_FLAGGED = "CONTENT_RISK_FLAGGED"
     #: A model coordinate landed outside any control and was snapped to the nearest one.
     CLICK_SNAPPED = "CLICK_SNAPPED"
+    #: An ambiguous consequential write is being checked by an independent read-only probe.
+    RECONCILIATION_STARTED = "RECONCILIATION_STARTED"
+    #: The probe found the record: the write landed despite the failed response.
+    RECONCILIATION_CONFIRMED = "RECONCILIATION_CONFIRMED"
+    #: The probe found no record: the write did not land, so a fresh run is safe.
+    RECONCILIATION_ABSENT = "RECONCILIATION_ABSENT"
+    #: The probe could not answer. Escalates rather than guessing in either direction.
+    RECONCILIATION_INCONCLUSIVE = "RECONCILIATION_INCONCLUSIVE"
 
 
 class Notice(StrictEvent):

@@ -23,6 +23,10 @@ class AuthorizationContext:
     #: Absolute URL a navigate action would land on. Checking only ``current_url`` would authorize
     #: where the session already is and let the action walk straight off the allowlist.
     destination_url: str | None = None
+    #: Set when the value an ``extract`` would record looks like regulated data. The caller scans;
+    #: policy decides. Reading data out is an action like any other, and it is the only one whose
+    #: risk depends on what is on the screen rather than on what the step is.
+    sensitive_extraction: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +45,10 @@ class PolicyConfig:
         )
     )
     blocked_route_patterns: tuple[str, ...] = ()
+    #: Whether a capability may record a value that looks like regulated data. Fail-closed: a
+    #: capability that legitimately needs an SSN is authored by someone who turned this on
+    #: deliberately, and that decision lives in configuration where it can be reviewed.
+    allow_sensitive_extraction: bool = False
 
 
 class PolicyEngine:
@@ -73,8 +81,21 @@ class PolicyEngine:
             for pattern in self.config.blocked_route_patterns
         ):
             return PolicyDecision(PolicyVerdict.DENY, "route:blocked", True)
-        if risk.level == RiskLevel.CONSEQUENTIAL_WRITE and not context.human_confirmed:
-            return PolicyDecision(PolicyVerdict.REQUIRE_HUMAN, "risk:consequential_write", True)
+        # Data egress. Every other action is judged by what it does; this one is judged by what it
+        # would carry out of the session, which is why the caller has to scan first.
+        if (
+            context.sensitive_extraction
+            and not self.config.allow_sensitive_extraction
+        ):
+            return PolicyDecision(PolicyVerdict.DENY, "extraction:sensitive_value", True)
+        if not context.human_confirmed:
+            # `requires_confirmation` is load-bearing, not decorative: a step may demand a human
+            # at any risk level. The schema forces it on for consequential writes; this honours it
+            # wherever an author set it.
+            if risk.level == RiskLevel.CONSEQUENTIAL_WRITE:
+                return PolicyDecision(PolicyVerdict.REQUIRE_HUMAN, "risk:consequential_write", True)
+            if risk.requires_confirmation:
+                return PolicyDecision(PolicyVerdict.REQUIRE_HUMAN, "risk:requires_confirmation", True)
         return PolicyDecision(PolicyVerdict.ALLOW, f"risk:{risk.level.value}", True)
 
     def _origin_allowed(self, url: ParseResult) -> bool:

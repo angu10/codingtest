@@ -243,6 +243,10 @@ class ClaudeDiscoveryModel:
         except Exception as exc:
             raise _configuration_error(exc) from exc
 
+    #: Page text is an aid to reading the screenshot, not a second source of truth. Bounded so a
+    #: long page cannot crowd out the image the model actually acts on.
+    PAGE_TEXT_LIMIT = 4_000
+
     def _observation_content(self, observation: Observation) -> list[dict[str, Any]]:
         import base64
 
@@ -256,6 +260,14 @@ class ClaudeDiscoveryModel:
                 },
             },
             {"type": "text", "text": f"Current URL: {observation.url}"},
+            # Redacted and scanned upstream. Included because an accessible name read from text is
+            # more reliable than one read off a screenshot — and because the content scanner is
+            # meaningless if the text it guards never reaches the model.
+            {
+                "type": "text",
+                "text": "Visible text on this screen:\n"
+                + observation.page_text[: self.PAGE_TEXT_LIMIT],
+            },
         ]
 
 

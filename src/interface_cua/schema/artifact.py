@@ -156,8 +156,19 @@ class TargetStateCondition(StrictModel):
 
 
 class TextCondition(StrictModel):
+    """Text that must be present. Either a literal, or the value of a declared input."""
+
     type: Literal["text"]
-    value: str = Field(min_length=1, max_length=500)
+    value: str | None = Field(default=None, min_length=1, max_length=500)
+    from_input: str | None = None
+
+    @model_validator(mode="after")
+    def exactly_one_source(self) -> TextCondition:
+        if (self.value is None) == (self.from_input is None):
+            raise ValueError("a text condition needs exactly one of value or from_input")
+        if self.from_input is not None and INPUT_REF_PATTERN.fullmatch(self.from_input) is None:
+            raise ValueError("from_input must have the form ${inputs.name}")
+        return self
 
 
 Condition = Annotated[
@@ -260,6 +271,32 @@ class RiskSpec(StrictModel):
         return self
 
 
+class ReconciliationSpec(StrictModel):
+    """How to find out whether a write landed, without repeating it.
+
+    When a consequential write returns an ambiguous answer, the one thing replay must never do is
+    try again — that is invariant 4, and it is the difference between a duplicate account and a
+    clean answer. So the capability declares an *independent, read-only* way to check.
+
+    Independence is the point: the probe deliberately does not reuse the route that just failed.
+    Keeping it in the artifact rather than the executor is what stops reconciliation becoming
+    app-specific knowledge baked into the engine.
+    """
+
+    #: Read-only route to consult. Templated the same way preconditions are.
+    probe_route: str = Field(min_length=1)
+    bindings: dict[InputName, str] = Field(default_factory=dict)
+    #: True on the probe's output exactly when the write took effect.
+    landed: Condition
+
+    @model_validator(mode="after")
+    def validate_bindings(self) -> ReconciliationSpec:
+        for reference in self.bindings.values():
+            if INPUT_REF_PATTERN.fullmatch(reference) is None:
+                raise ValueError(f"probe binding must be an input reference: {reference}")
+        return self
+
+
 class Interstitial(StrictModel):
     """A known, recoverable screen the capability is allowed to dismiss.
 
@@ -310,6 +347,11 @@ class OutputSpec(StrictModel):
     extraction: TargetSpec
     enum_values: list[str] | None = None
     max_length: int | None = Field(default=None, ge=1, le=4000)
+    #: Regulated data the capability returns. The value still reaches the caller — that is what the
+    #: caller asked for — but it is masked everywhere we persist or print it. Set by the compiler
+    #: when the discovered value matched the PII scanner; a reviewer may relax it, and the default
+    #: is never the leaky one.
+    sensitive: bool = False
 
     @model_validator(mode="after")
     def validate_output(self) -> OutputSpec:
@@ -351,6 +393,8 @@ class Capability(StrictModel):
     inputs: list[InputSpec] = Field(min_length=1)
     outputs: list[OutputSpec] = Field(default_factory=list)
     interstitials: list[Interstitial] = Field(default_factory=list)
+    #: Required in practice for any capability with a consequential write — see the validator.
+    reconciliation: ReconciliationSpec | None = None
     steps: list[Step] = Field(min_length=1)
     provenance: Provenance
 
@@ -364,6 +408,18 @@ class Capability(StrictModel):
         _require_unique(step_ids, "step ids")
         _require_unique([item.name for item in self.interstitials], "interstitial names")
 
+        # A consequential write can always come back ambiguous, and the only safe response is an
+        # independent check. Without one the executor's honest answer is "I don't know and I
+        # can't find out" — so the schema refuses the artifact rather than shipping that.
+        if (
+            any(step.risk.level == RiskLevel.CONSEQUENTIAL_WRITE for step in self.steps)
+            and self.reconciliation is None
+        ):
+            raise ValueError(
+                "a capability with a consequential write must declare `reconciliation`: "
+                "an ambiguous write that cannot be checked can only ever escalate"
+            )
+
         declared_steps = set(step_ids)
         for output in self.outputs:
             if output.after_step not in declared_steps:
@@ -376,15 +432,23 @@ class Capability(StrictModel):
             references: list[str] = []
             if step.action.value is not None:
                 references.append(step.action.value.from_input)
-            if isinstance(step.precondition, RouteCondition):
-                references.extend(step.precondition.bindings.values())
+            references.extend(_condition_references(step.precondition))
             for branch in step.postcondition.any_of:
-                if isinstance(branch.condition, RouteCondition):
-                    references.extend(branch.condition.bindings.values())
+                references.extend(_condition_references(branch.condition))
             for reference in references:
                 match = INPUT_REF_PATTERN.fullmatch(reference)
                 if match is None or match.group(1) not in declared_inputs:
                     raise ValueError(f"step {step.id} references undeclared input {reference}")
+
+        if self.reconciliation is not None:
+            probe_references = [
+                *self.reconciliation.bindings.values(),
+                *_condition_references(self.reconciliation.landed),
+            ]
+            for reference in probe_references:
+                match = INPUT_REF_PATTERN.fullmatch(reference)
+                if match is None or match.group(1) not in declared_inputs:
+                    raise ValueError(f"reconciliation references undeclared input {reference}")
         return self
 
     @classmethod
@@ -395,6 +459,16 @@ class Capability(StrictModel):
     def to_yaml(self, path: str | Path) -> None:
         payload = self.model_dump(mode="json", exclude_none=True)
         Path(path).write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _condition_references(condition: Condition) -> list[str]:
+    """Every `${inputs.x}` a condition depends on, so the contract can be checked as a whole."""
+
+    if isinstance(condition, RouteCondition):
+        return list(condition.bindings.values())
+    if isinstance(condition, TextCondition) and condition.from_input is not None:
+        return [condition.from_input]
+    return []
 
 
 def _require_unique(values: list[str], label: str) -> None:

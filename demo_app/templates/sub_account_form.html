@@ -2,14 +2,15 @@
 {% block title %}Open Sub-Account — Meridian CU{% endblock %}
 {% block body %}
 <h1>Open Sub-Account</h1>
+{% if error %}<p class="c2">{{ error }}</p>{% endif %}
 <table><tr><td class="c1"><table>
   <tr><th>Member</th><td>{{ member.name }}</td></tr><tr><th>Source</th><td>{{ account.kind }}</td></tr>
 </table></td></tr><tr><td>
 <form method="post" action="/service/x4m9p/{{ member_id }}/{{ account.id }}/review">
   <table>
-    <tr><td>Product</td><td><label>Account type <select name="account_type"><option value="savings">Savings</option><option value="money_market">Money Market</option></select></label></td></tr>
-    <tr><td>Optional name</td><td><label>Nickname <input name="nickname" maxlength="40"></label></td></tr>
-    <tr><td>Funding</td><td><label>Opening deposit <input name="opening_deposit" value="0.00" inputmode="decimal"></label></td></tr>
+    <tr><td>Product</td><td><label>Account type <select name="account_type"><option value="savings"{% if submitted.account_type == "savings" %} selected{% endif %}>Savings</option><option value="money_market"{% if submitted.account_type == "money_market" %} selected{% endif %}>Money Market</option></select></label></td></tr>
+    <tr><td>Optional name</td><td><label>Nickname <input name="nickname" maxlength="40" value="{{ submitted.nickname }}"></label></td></tr>
+    <tr><td>Funding</td><td><label>Opening deposit <input name="opening_deposit" value="{{ submitted.opening_deposit }}" inputmode="decimal"></label></td></tr>
   </table>
   <p><button class="btn" type="submit">Continue to Review</button></p>
 </form>

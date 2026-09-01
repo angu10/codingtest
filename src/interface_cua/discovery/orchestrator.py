@@ -20,6 +20,7 @@ from typing import Any
 from interface_cua.discovery.model import DiscoveryModel, ModelAction, Observation
 from interface_cua.discovery.recorder import RecordedTarget, Recorder
 from interface_cua.observability.events import (
+    ContentScanEvent,
     NoticeKind,
     PolicyDecisionEvent,
     ProposedAction,
@@ -37,6 +38,7 @@ from interface_cua.policy.content_scanner import (
     HeuristicContentRiskScanner,
 )
 from interface_cua.policy.engine import AuthorizationContext, PolicyEngine, PolicyVerdict
+from interface_cua.policy.redaction import PIIScanner, RegexPIIScanner
 from interface_cua.schema.artifact import ActionSpec, InputValue, RiskLevel, RiskSpec
 
 MAX_STEPS = 25
@@ -81,6 +83,8 @@ class RecordedOutput:
     #: The URL the value was visible on. The compiler pins extraction to the step that lands
     #: here — an output read on member detail cannot be re-read from the form page.
     captured_at_url: str
+    #: The observed value matched the PII scanner. Carried into the artifact so replay masks it.
+    sensitive: bool = False
 
 
 @dataclass(slots=True)
@@ -101,6 +105,7 @@ _RISK_BY_ACTION = {
     "key": RiskLevel.REVERSIBLE_WRITE,
     "scroll": RiskLevel.READ,
     "screenshot": RiskLevel.READ,
+    "extract": RiskLevel.READ,
 }
 
 _POLICY_ACTION = {
@@ -109,6 +114,7 @@ _POLICY_ACTION = {
     "key": "keypress",
     "scroll": "click",
     "screenshot": "extract",
+    "extract": "extract",
 }
 
 
@@ -123,6 +129,7 @@ class DiscoveryOrchestrator:
         evidence: EvidenceWriter,
         goal: str,
         scanner: ContentRiskScanner | None = None,
+        pii_scanner: PIIScanner | None = None,
         max_steps: int = MAX_STEPS,
         wall_clock_seconds: float = WALL_CLOCK_SECONDS,
     ) -> None:
@@ -133,6 +140,9 @@ class DiscoveryOrchestrator:
         self.evidence = evidence
         self.goal = goal
         self.scanner = scanner or HeuristicContentRiskScanner()
+        # Same Protocol the redactor uses, so "what counts as regulated data" has one definition
+        # whether it is being masked on the way to disk or refused on the way out of a session.
+        self.pii_scanner = pii_scanner or RegexPIIScanner()
         self.max_steps = max_steps
         self.wall_clock_seconds = wall_clock_seconds
 
@@ -146,7 +156,7 @@ class DiscoveryOrchestrator:
                 result.outcome = DiscoveryOutcome.TIME_LIMIT
                 return result
 
-            observation, digest = await self._observe()
+            observation, digest, scan = await self._observe()
             turn = await self.model.propose(observation)
             if not turn.actions:
                 result.outcome = DiscoveryOutcome.NO_ACTION
@@ -167,7 +177,7 @@ class DiscoveryOrchestrator:
             tool_results: list[dict[str, Any]] = []
             for action in turn.actions:
                 stop = await self._handle(
-                    action, index, turn.rationale_summary, result, tool_results
+                    action, index, turn.rationale_summary, result, tool_results, scan
                 )
                 if stop is not None:
                     result.outcome = stop
@@ -186,6 +196,7 @@ class DiscoveryOrchestrator:
         rationale: str | None,
         result: DiscoveryRun,
         tool_results: list[dict[str, Any]],
+        scan: ContentScanEvent,
     ) -> DiscoveryOutcome | None:
         """Execute one proposed action. Returns a terminal outcome, or None to continue."""
 
@@ -193,6 +204,36 @@ class DiscoveryOrchestrator:
             return DiscoveryOutcome.FINISHED
         if action.kind == "escalate":
             return DiscoveryOutcome.ESCALATED
+        # Extraction is data egress, so it is authorized like everything else — but its risk comes
+        # from the *value*, not the action, so it is scanned before policy is asked. `authorize`
+        # decides; this only supplies the fact.
+        sensitive_extraction = (
+            action.kind == "extract"
+            and action.text is not None
+            and bool(self.pii_scanner.scan(action.text))
+        )
+
+        decision = self.policy.authorize(
+            _policy_action(action.kind),
+            RiskSpec(
+                level=_RISK_BY_ACTION.get(action.kind, RiskLevel.REVERSIBLE_WRITE),
+                requires_confirmation=False,
+            ),
+            AuthorizationContext(
+                self.surface.current_url, sensitive_extraction=sensitive_extraction
+            ),
+        )
+        policy_event = PolicyDecisionEvent(
+            verdict=decision.verdict.value, rule=decision.rule, origin_ok=decision.origin_ok
+        )
+        if decision.verdict is not PolicyVerdict.ALLOW:
+            # The model asked; policy said no. It does not get to retry past this.
+            self._emit(
+                index, action, rationale, policy_event, None, scan, ok=False, note=decision.rule
+            )
+            result.detail = f"policy {decision.verdict.value}: {decision.rule}"
+            return DiscoveryOutcome.POLICY_DENIED
+
         if action.kind == "extract":
             if action.output_name and action.text is not None:
                 # Anchor the output the same way a click is anchored. The model tells us the
@@ -203,26 +244,13 @@ class DiscoveryOrchestrator:
                     observed_value=action.text,
                     target=await self._locate_text(action.text),
                     captured_at_url=self.surface.current_url,
+                    sensitive=sensitive_extraction,
                 )
+            self._emit(
+                index, action, rationale, policy_event, None, scan, ok=True, note="recorded"
+            )
             tool_results.append(_ok(action, "recorded"))
             return None
-
-        decision = self.policy.authorize(
-            _policy_action(action.kind),
-            RiskSpec(
-                level=_RISK_BY_ACTION.get(action.kind, RiskLevel.REVERSIBLE_WRITE),
-                requires_confirmation=False,
-            ),
-            AuthorizationContext(self.surface.current_url),
-        )
-        policy_event = PolicyDecisionEvent(
-            verdict=decision.verdict.value, rule=decision.rule, origin_ok=decision.origin_ok
-        )
-        if decision.verdict is not PolicyVerdict.ALLOW:
-            # The model asked; policy said no. It does not get to retry past this.
-            self._emit(index, action, rationale, policy_event, None, ok=False, note=decision.rule)
-            result.detail = f"policy {decision.verdict.value}: {decision.rule}"
-            return DiscoveryOutcome.POLICY_DENIED
 
         url_before = self.surface.current_url
         # Resolve semantics *before* acting — after the click the element may be gone.
@@ -251,7 +279,7 @@ class DiscoveryOrchestrator:
                 rationale=rationale,
             )
         )
-        self._emit(index, action, rationale, policy_event, target, ok=True, note=url_after)
+        self._emit(index, action, rationale, policy_event, target, scan, ok=True, note=url_after)
         tool_results.append(_ok(action, "done"))
         return None
 
@@ -316,13 +344,18 @@ class DiscoveryOrchestrator:
             await page.mouse.wheel(0, int(action.raw_input.get("scroll_amount", 3)) * 100)
         await self.surface.wait_until_settled(5_000)
 
-    async def _observe(self) -> tuple[Observation, str]:
+    async def _observe(self) -> tuple[Observation, str, ContentScanEvent]:
         screenshot = await self.surface.screenshot()
-        text = await self.surface.page_text()
+        raw = await self.surface.page_text()
+
+        # Masked before it enters model context, not on the way to disk. The same run values that
+        # are masked in the log are masked here, so a member id the model does not need to see in
+        # clear text never reaches the API in the text channel.
+        text = str(self.evidence.redactor.redact(raw).value)
+
         scan = self.scanner.scan(text)
         if scan.verdict is not ContentVerdict.CLEAN:
-            # Logged before the text reaches model context — that is the point of the scan. It is
-            # a signal, not a gate: containment comes from policy and the LLM-free replay path.
+            # A signal, not a gate: containment comes from policy and the LLM-free replay path.
             self.evidence.notice(
                 NoticeKind.CONTENT_RISK_FLAGGED,
                 signals=list(scan.signals),
@@ -331,7 +364,10 @@ class DiscoveryOrchestrator:
         observation = Observation(
             screenshot_png=screenshot, url=self.surface.current_url, page_text=text
         )
-        return observation, f"{self.surface.current_url}|{hash(text)}"
+        scan_event = ContentScanEvent(
+            verdict=scan.verdict.value, scanner=scan.scanner, signals=list(scan.signals)
+        )
+        return observation, f"{self.surface.current_url}|{hash(text)}", scan_event
 
     def _emit(
         self,
@@ -340,6 +376,7 @@ class DiscoveryOrchestrator:
         rationale: str | None,
         policy: PolicyDecisionEvent,
         target: RecordedTarget | None,
+        scan: ContentScanEvent,
         *,
         ok: bool,
         note: str,
@@ -358,6 +395,7 @@ class DiscoveryOrchestrator:
                     else _target_event(target)
                 ),
                 rationale_summary=rationale,
+                content_scan=scan,
                 result=StepResult(ok=ok, elapsed_ms=0, postcondition=note),
             )
         )

@@ -57,6 +57,51 @@ def test_happy_path_reaches_review_and_create(client: TestClient) -> None:
     assert "Sub-Account Created" in created.text
 
 
+def test_member_detail_renders_regulated_data(client: TestClient) -> None:
+    """A servicing console with no PII on screen would not exercise the controls that guard it.
+
+    Every SSN in the seed data is in the 666-xx-xxxx block, which the SSA has never issued.
+    """
+
+    response = client.get("/member/58431")
+    assert response.status_code == 200
+    assert "666-19-4472" in response.text
+    assert "1979-11-02" in response.text
+    # The member reference stays masked where it is *displayed*. It still appears in the iframe
+    # URL, which is the app being an app — masking a route would break the page.
+    assert "•••8431" in response.text
+    assert ">58431<" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("deposit", "message"),
+    [
+        ("-5.00", "Opening deposit cannot be negative."),
+        ("not-a-number", "Opening deposit must be an amount"),
+    ],
+)
+def test_a_bad_deposit_re_renders_the_form_instead_of_raising(
+    client: TestClient, deposit: str, message: str
+) -> None:
+    """The form comes back with a message beside the field, not a framework error page."""
+
+    response = client.post(
+        "/service/x4m9p/58431/sav-42/review",
+        data={
+            "account_type": "savings",
+            "nickname": "Rainy day",
+            "opening_deposit": deposit,
+        },
+    )
+    assert response.status_code == 422
+    assert message in response.text
+    assert "Open Sub-Account" in response.text
+    assert "Review Sub-Account" not in response.text
+    # A real form re-render keeps what the operator typed.
+    assert 'value="Rainy day"' in response.text
+    assert f'value="{deposit}"' in response.text
+
+
 @pytest.mark.parametrize(
     ("member_id", "path", "status", "marker"),
     [

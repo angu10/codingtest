@@ -33,10 +33,15 @@ class FailureCategory(StrEnum):
 
 
 class ReconciliationState(StrEnum):
+    """Only `pending` is ever carried on a result.
+
+    Once the probe has answered, the answer *is* the result type — `SuccessResult(reconciled=True)`
+    when the write landed, a retryable `FailureResult` when it did not, `NeedsHumanResult` when the
+    probe could not tell. Duplicating those three as enum members would let a result assert one
+    state in its status and a different one in a field.
+    """
+
     PENDING = "pending"
-    CONFIRMED = "confirmed"
-    ABSENT = "absent"
-    INCONCLUSIVE = "inconclusive"
 
 
 class SuccessResult(StrictResult):
@@ -64,10 +69,17 @@ class FailureResult(StrictResult):
 
 
 class NeedsHumanResult(StrictResult):
+    """The run stopped and is asking for a person.
+
+    ``lease_required`` is a *request*, not a report: automation still holds the session when this
+    is returned, and the transfer happens only if a caller acts on it. Naming it for the state it
+    asks for rather than the state it is in keeps the result from asserting something untrue.
+    """
+
     status: Literal["needs_human"] = "needs_human"
     reason: str = Field(min_length=1)
     step: str = Field(min_length=1)
-    lease: Literal["HUMAN"] = "HUMAN"
+    lease_required: Literal["HUMAN"] = "HUMAN"
 
 
 class UnknownSideEffectResult(StrictResult):

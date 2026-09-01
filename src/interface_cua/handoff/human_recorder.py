@@ -81,7 +81,10 @@ _LISTENER_JS = """
   document.addEventListener('blur', e => {
     if (e.target && 'value' in e.target && e.target.value) push('input', e.target, e.target.value);
   }, true);
-  push('navigation', document.body, undefined);
+  // A navigation has no element. Passing document.body would describe it by the page's own text,
+  // putting an arbitrary slab of the screen into the action log — and `mask` only covers `value`,
+  // never `name`, so that text would arrive unmasked. The URL is the whole story here.
+  push('navigation', null, undefined);
 }
 """
 

@@ -13,17 +13,18 @@ from pathlib import Path
 ENV_FILE = ".env"
 
 
-def load_env(start: Path | None = None) -> dict[str, str]:
+def load_env(start: Path | None = None) -> list[str]:
     """Load `KEY=value` pairs from the nearest `.env`, walking up from `start`.
 
     Existing environment variables win — an explicitly exported key is more specific than a file.
-    Returns the names that were loaded, never the values.
+    Returns the names that were loaded, never the values: a caller that wants to log what it read
+    must not be handed the secrets to log.
     """
 
     path = _find(start or Path.cwd())
     if path is None:
-        return {}
-    loaded: dict[str, str] = {}
+        return []
+    loaded: list[str] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -33,8 +34,8 @@ def load_env(start: Path | None = None) -> dict[str, str]:
         value = value.strip().strip('"').strip("'")
         if name and name not in os.environ:
             os.environ[name] = value
-            loaded[name] = value
-    return loaded
+            loaded.append(name)
+    return sorted(loaded)
 
 
 def workspace_headers() -> dict[str, str]:

@@ -348,6 +348,11 @@
           "title": "Name",
           "type": "string"
         },
+        "sensitive": {
+          "default": false,
+          "title": "Sensitive",
+          "type": "boolean"
+        },
         "type": {
           "$ref": "#/$defs/ValueType"
         }
@@ -516,6 +521,58 @@
         "operator"
       ],
       "title": "Provenance",
+      "type": "object"
+    },
+    "ReconciliationSpec": {
+      "additionalProperties": false,
+      "description": "How to find out whether a write landed, without repeating it.\n\nWhen a consequential write returns an ambiguous answer, the one thing replay must never do is\ntry again \u2014 that is invariant 4, and it is the difference between a duplicate account and a\nclean answer. So the capability declares an *independent, read-only* way to check.\n\nIndependence is the point: the probe deliberately does not reuse the route that just failed.\nKeeping it in the artifact rather than the executor is what stops reconciliation becoming\napp-specific knowledge baked into the engine.",
+      "properties": {
+        "bindings": {
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "type": "string"
+            }
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "landed": {
+          "discriminator": {
+            "mapping": {
+              "page": "#/$defs/PageCondition",
+              "route": "#/$defs/RouteCondition",
+              "target_state": "#/$defs/TargetStateCondition",
+              "text": "#/$defs/TextCondition"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PageCondition"
+            },
+            {
+              "$ref": "#/$defs/RouteCondition"
+            },
+            {
+              "$ref": "#/$defs/TargetStateCondition"
+            },
+            {
+              "$ref": "#/$defs/TextCondition"
+            }
+          ],
+          "title": "Landed"
+        },
+        "probe_route": {
+          "minLength": 1,
+          "title": "Probe Route",
+          "type": "string"
+        }
+      },
+      "required": [
+        "probe_route",
+        "landed"
+      ],
+      "title": "ReconciliationSpec",
       "type": "object"
     },
     "RelativeStrategy": {
@@ -829,22 +886,42 @@
     },
     "TextCondition": {
       "additionalProperties": false,
+      "description": "Text that must be present. Either a literal, or the value of a declared input.",
       "properties": {
+        "from_input": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Input"
+        },
         "type": {
           "const": "text",
           "title": "Type",
           "type": "string"
         },
         "value": {
-          "maxLength": 500,
-          "minLength": 1,
-          "title": "Value",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
         }
       },
       "required": [
-        "type",
-        "value"
+        "type"
       ],
       "title": "TextCondition",
       "type": "object"
@@ -923,6 +1000,17 @@
     },
     "provenance": {
       "$ref": "#/$defs/Provenance"
+    },
+    "reconciliation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReconciliationSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "schema_version": {
       "const": "1.0",

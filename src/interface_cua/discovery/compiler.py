@@ -289,6 +289,9 @@ def _output_spec(recorded: Any, after_step: str) -> OutputSpec:
         after_step=after_step,
         extraction=recorded.target.target,
         max_length=200 if value_type is ValueType.STRING else None,
+        # The scanner decided this at extraction time, when the value was still in hand. The
+        # artifact stores the judgement, never the value that produced it.
+        sensitive=bool(getattr(recorded, "sensitive", False)),
     )
 
 

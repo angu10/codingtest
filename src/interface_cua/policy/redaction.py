@@ -20,19 +20,48 @@ class PIIScanner(Protocol):
 
 
 class RegexPIIScanner:
-    """Small defense-in-depth scanner; deterministic field masking is the primary control."""
+    """Small defense-in-depth scanner; deterministic field masking is the primary control.
+
+    Every finding here means the *field schema* missed something, so a false positive costs a
+    spurious `REDACTION_SCHEMA_GAP` notice and sends someone looking for a masking rule that does
+    not need to exist. Patterns are therefore anchored tightly, and card numbers are Luhn-checked
+    rather than matched on shape alone. See `REPORT.md` §6 for the production replacement.
+    """
 
     _patterns: ClassVar[dict[str, re.Pattern[str]]] = {
         "ssn": re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"),
         "email": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
         "phone": re.compile(r"(?<!\d)(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?!\d)"),
+        "credit_card": re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)"),
     }
+
+    #: Kinds whose match is only a finding if it also passes a checksum.
+    _checksummed: ClassVar[frozenset[str]] = frozenset({"credit_card"})
 
     def scan(self, text: str) -> list[PIIFinding]:
         findings: list[PIIFinding] = []
         for kind, pattern in self._patterns.items():
-            findings.extend(PIIFinding(kind, match.start(), match.end()) for match in pattern.finditer(text))
+            for match in pattern.finditer(text):
+                if kind in self._checksummed and not _luhn_ok(match.group()):
+                    continue
+                findings.append(PIIFinding(kind, match.start(), match.end()))
         return sorted(findings, key=lambda finding: finding.start)
+
+
+def _luhn_ok(candidate: str) -> bool:
+    """Luhn check. A 16-digit account reference is not a card number just because it is 16 digits."""
+
+    digits = [int(character) for character in candidate if character.isdigit()]
+    if not 13 <= len(digits) <= 19:
+        return False
+    total = 0
+    for index, digit in enumerate(reversed(digits)):
+        if index % 2:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,21 +88,29 @@ class Redactor:
         self.sensitive_values = frozenset(v for v in sensitive_values if len(v) >= 3)
 
     def redact(self, value: Any) -> RedactionResult:
-        masked = self._mask(value, field_name=None)
-        gaps = tuple(sorted({finding.kind for finding in self.scanner.scan(_flatten_text(masked))}))
-        return RedactionResult(masked, gaps)
+        """Mask, then report what had to be masked by pattern rather than by name.
 
-    def _mask(self, value: Any, field_name: str | None) -> Any:
+        Stage two both *masks* and *reports*. Masking stops the leak — free text like a failure
+        bundle's `observed` field carries whatever was on the screen, and an SSN in there is an SSN
+        on disk. Reporting keeps the signal: a stage-two hit means our field schema missed
+        something, which is a fact about our own controls and should not be quietly swallowed.
+        """
+
+        gaps: set[str] = set()
+        masked = self._mask(value, field_name=None, gaps=gaps)
+        return RedactionResult(masked, tuple(sorted(gaps)))
+
+    def _mask(self, value: Any, field_name: str | None, gaps: set[str]) -> Any:
         if field_name in self.sensitive_fields:
             return _mask_sensitive(field_name, value)
         if isinstance(value, dict):
-            return {key: self._mask(item, str(key)) for key, item in value.items()}
+            return {key: self._mask(item, str(key), gaps) for key, item in value.items()}
         if isinstance(value, list):
-            return [self._mask(item, field_name) for item in value]
+            return [self._mask(item, field_name, gaps) for item in value]
         if isinstance(value, tuple):
-            return tuple(self._mask(item, field_name) for item in value)
+            return tuple(self._mask(item, field_name, gaps) for item in value)
         if isinstance(value, str):
-            return self._mask_values(value)
+            return self._mask_residue(self._mask_values(value), gaps)
         return value
 
     def _mask_values(self, text: str) -> str:
@@ -82,18 +119,40 @@ class Redactor:
                 text = text.replace(secret, f"***{secret[-4:]}")
         return text
 
+    def _mask_residue(self, text: str, gaps: set[str]) -> str:
+        findings = self.scanner.scan(text)
+        if not findings:
+            return text
+        pieces: list[str] = []
+        cursor = 0
+        for finding in findings:
+            if finding.start < cursor:
+                continue  # overlaps one already masked
+            gaps.add(finding.kind)
+            pieces.append(text[cursor : finding.start])
+            pieces.append(_mask_span(text[finding.start : finding.end]))
+            cursor = finding.end
+        pieces.append(text[cursor:])
+        return "".join(pieces)
+
+
+#: At or below this length, "the last four characters" *is* the value, and masking reveals it whole.
+#: Five stays maskable on purpose: `***8431` for a five-digit member reference is the convention
+#: invariant 7 states and the application itself renders.
+_WHOLLY_REVEALED = 4
+
 
 def _mask_sensitive(field_name: str, value: Any) -> str:
     lowered = field_name.lower()
     if "password" in lowered or "secret" in lowered:
         return "[redacted]"
     text = str(value)
-    return f"***{text[-4:]}" if text else "[redacted]"
+    if len(text) <= _WHOLLY_REVEALED:
+        return "[redacted]"
+    return f"***{text[-4:]}"
 
 
-def _flatten_text(value: Any) -> str:
-    if isinstance(value, dict):
-        return " ".join(f"{key} {_flatten_text(item)}" for key, item in value.items())
-    if isinstance(value, (list, tuple)):
-        return " ".join(_flatten_text(item) for item in value)
-    return str(value)
+def _mask_span(matched: str) -> str:
+    """Mask a pattern hit the same way a declared field is masked, so logs read consistently."""
+
+    return "[redacted]" if len(matched) <= _WHOLLY_REVEALED else f"***{matched[-4:]}"

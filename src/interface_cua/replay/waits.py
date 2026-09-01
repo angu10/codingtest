@@ -36,7 +36,11 @@ class ConditionChecker:
         if isinstance(condition, TargetStateCondition):
             return await self._target_state(condition.target, condition.state)
         if isinstance(condition, TextCondition):
-            return condition.value in await self.surface.page_text()
+            expected = condition.value
+            if expected is None and condition.from_input is not None:
+                name = condition.from_input.removeprefix("${inputs.").removesuffix("}")
+                expected = str(inputs[name])
+            return bool(expected) and expected in await self.surface.page_text()
         if isinstance(condition, RouteCondition):
             return _route_matches(condition, self.surface.current_url, inputs)
         raise TypeError(f"unsupported condition: {type(condition).__name__}")

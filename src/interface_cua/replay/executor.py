@@ -25,6 +25,7 @@ from interface_cua.policy.engine import (
     PolicyVerdict,
 )
 from interface_cua.replay.polling import poll_until
+from interface_cua.replay.reconcile import Reconciler
 from interface_cua.replay.targeting import (
     LocatorAttempt,
     TargetAmbiguous,
@@ -77,6 +78,9 @@ class ReplayExecutor:
         self.evidence = evidence
         self.resolver = TargetResolver(surface)
         self.checker = ConditionChecker(surface, self.resolver)
+        self.reconciler = Reconciler(
+            surface, self.checker, policy, timeout_ms=timeout_ms, evidence=evidence
+        )
 
     async def execute(
         self,
@@ -85,7 +89,6 @@ class ReplayExecutor:
         *,
         confirmed_steps: frozenset[str] = frozenset(),
         resume_from: str | None = None,
-        known_outputs: dict[str, Any] | None = None,
     ) -> ReplayResult:
         """Run the capability and, on any non-success terminal state, leave a failure bundle.
 
@@ -95,9 +98,7 @@ class ReplayExecutor:
         from a step number that no longer means anything.
         """
 
-        result = await self._execute(
-            artifact, arguments, confirmed_steps, resume_from, known_outputs or {}
-        )
+        result = await self._execute(artifact, arguments, confirmed_steps, resume_from)
         if self.evidence is None:
             return result
         bundle = await self.evidence.capture_failure(self.surface, result)
@@ -111,7 +112,6 @@ class ReplayExecutor:
         arguments: dict[str, object],
         confirmed_steps: frozenset[str],
         resume_from: str | None = None,
-        known_outputs: dict[str, Any] | None = None,
     ) -> ReplayResult:
         # Entry checks are exactly that. On a resume the session is deliberately mid-flow, so
         # re-asserting the entry route and landmarks would fail every resume — and would mask the
@@ -130,7 +130,7 @@ class ReplayExecutor:
                 observed=str(exc),
             )
 
-        outputs: dict[str, Any] = dict(known_outputs or {})
+        outputs: dict[str, Any] = {}
         steps = artifact.steps
         if resume_from is not None:
             names = [step.id for step in steps]
@@ -148,7 +148,18 @@ class ReplayExecutor:
             result = await self._run_step_with_retry(
                 artifact, step, inputs, confirmed_steps, index
             )
+            if isinstance(result, UnknownSideEffectResult) and artifact.reconciliation is not None:
+                # The write may or may not have happened. The one thing that must not happen now
+                # is another attempt at it (invariant 4) — so look, don't retry.
+                return await self.reconciler.resolve(
+                    artifact.reconciliation, result, inputs, outputs
+                )
             if result is not None:
+                # A declared business outcome is still a successful invocation, so anything the
+                # capability already promised and harvested belongs in the answer. Attached here
+                # rather than threaded through every step signature.
+                if isinstance(result, BusinessOutcomeResult) and outputs:
+                    return result.model_copy(update={"outputs": dict(outputs)})
                 return result
             harvest_failure = await self._harvest_outputs(artifact, step, outputs)
             if harvest_failure is not None:

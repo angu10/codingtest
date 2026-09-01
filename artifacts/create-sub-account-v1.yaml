@@ -1,0 +1,405 @@
+schema_version: '1.0'
+capability:
+  id: create-sub-account
+  version: 1.0.0
+  description: >-
+    Open a sub-account and submit it. Exists to exercise the consequential-write path: the final
+    step requires human confirmation, is never retried, and an ambiguous response is resolved by an
+    independent read-only probe rather than by clicking Create again.
+approval_state: draft
+application:
+  family: meridian-cu
+  supported_versions:
+  - demo-v1
+  fingerprint:
+    route_patterns:
+    - /
+    - /member/:id
+    - /service/x4m9p/:member_id/:account_id
+    - /service/q2c8v/create
+    entry_landmarks:
+    - Member Search
+    - Member ID
+inputs:
+- name: member_id
+  type: string
+  description: Synthetic member reference.
+  required: true
+  sensitive: true
+  min_length: 5
+  max_length: 5
+  pattern: ^\d{5}$
+- name: account_type
+  type: enum
+  description: Type of sub-account to create.
+  required: true
+  sensitive: false
+  enum_values:
+  - savings
+  - money_market
+- name: nickname
+  type: string
+  description: >-
+    Label for the new sub-account. Doubles as the reconciliation key — it is what the probe looks
+    for to decide whether the write landed.
+  required: true
+  sensitive: false
+  min_length: 3
+  max_length: 40
+- name: opening_deposit
+  type: decimal
+  description: >-
+    Amount to fund the new sub-account with. Type validation happens before the browser opens;
+    whether the amount is *allowed* is the application's judgement, and a rejection is the
+    declared DEPOSIT_INVALID outcome rather than a system failure.
+  required: true
+  sensitive: false
+
+# How to find out whether the write happened, without repeating it. The probe is a different
+# route from the one that failed, and it is read-only.
+reconciliation:
+  probe_route: /api/members/:member_id/sub-accounts
+  bindings:
+    member_id: ${inputs.member_id}
+  landed:
+    type: text
+    from_input: ${inputs.nickname}
+
+steps:
+- id: fill-member-id
+  precondition:
+    type: page
+    name: member-search
+    landmark:
+      strategies:
+      - type: accessibility
+        role: textbox
+        name: Member ID
+        exact: true
+      must_be_unique: true
+  action:
+    type: fill
+    value:
+      from_input: ${inputs.member_id}
+  target:
+    strategies:
+    - type: accessibility
+      role: textbox
+      name: Member ID
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: member-id-filled
+      condition:
+        type: page
+        name: member-search
+        landmark:
+          strategies:
+          - type: accessibility
+            role: button
+            name: Search
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 1
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: search-member
+  precondition:
+    type: page
+    name: member-search
+    landmark:
+      strategies:
+      - type: accessibility
+        role: button
+        name: Search
+        exact: true
+      must_be_unique: true
+  action:
+    type: click
+  target:
+    strategies:
+    - type: accessibility
+      role: button
+      name: Search
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: member-found
+      condition:
+        type: page
+        name: member-detail
+        landmark:
+          frame: account-frame
+          strategies:
+          - type: text
+            value: Current balance
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 2
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: open-sub-account-form
+  precondition:
+    type: page
+    name: member-detail
+    landmark:
+      frame: account-frame
+      strategies:
+      - type: text
+        value: Current balance
+        exact: true
+      must_be_unique: true
+  action:
+    type: click
+  target:
+    frame: account-frame
+    strategies:
+    - type: accessibility
+      role: link
+      name: Open Sub-Account
+      exact: true
+    - type: relative
+      anchor: Savings Account
+      role: link
+      name: Open Sub-Account
+      relation: same_row
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: form-opened
+      condition:
+        type: page
+        name: sub-account-form
+        landmark:
+          strategies:
+          - type: accessibility
+            role: combobox
+            name: Account type
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 2
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: select-account-type
+  precondition:
+    type: page
+    name: sub-account-form
+    landmark:
+      strategies:
+      - type: accessibility
+        role: combobox
+        name: Account type
+        exact: true
+      must_be_unique: true
+  action:
+    type: select
+    value:
+      from_input: ${inputs.account_type}
+  target:
+    strategies:
+    - type: accessibility
+      role: combobox
+      name: Account type
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: type-selected
+      condition:
+        type: page
+        name: sub-account-form
+        landmark:
+          strategies:
+          - type: accessibility
+            role: textbox
+            name: Nickname
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 1
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: fill-nickname
+  precondition:
+    type: page
+    name: sub-account-form
+    landmark:
+      strategies:
+      - type: accessibility
+        role: textbox
+        name: Nickname
+        exact: true
+      must_be_unique: true
+  action:
+    type: fill
+    value:
+      from_input: ${inputs.nickname}
+  target:
+    strategies:
+    - type: accessibility
+      role: textbox
+      name: Nickname
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: nickname-filled
+      condition:
+        type: page
+        name: sub-account-form
+        landmark:
+          strategies:
+          - type: accessibility
+            role: button
+            name: Continue to Review
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 1
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: fill-opening-deposit
+  precondition:
+    type: page
+    name: sub-account-form
+    landmark:
+      strategies:
+      - type: accessibility
+        role: textbox
+        name: Opening deposit
+        exact: true
+      must_be_unique: true
+  action:
+    type: fill
+    value:
+      from_input: ${inputs.opening_deposit}
+  target:
+    strategies:
+    - type: accessibility
+      role: textbox
+      name: Opening deposit
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: deposit-filled
+      condition:
+        type: page
+        name: sub-account-form
+        landmark:
+          strategies:
+          - type: accessibility
+            role: button
+            name: Continue to Review
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 1
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: continue-to-review
+  precondition:
+    type: page
+    name: sub-account-form
+    landmark:
+      strategies:
+      - type: accessibility
+        role: button
+        name: Continue to Review
+        exact: true
+      must_be_unique: true
+  action:
+    type: click
+  target:
+    strategies:
+    - type: accessibility
+      role: button
+      name: Continue to Review
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: review-reached
+      condition:
+        type: page
+        name: sub-account-review
+        landmark:
+          strategies:
+          - type: accessibility
+            role: button
+            name: Create
+            exact: true
+          must_be_unique: true
+    # The form rejected the amount and re-rendered itself. Nothing was created, the caller asked a
+    # reasonable question and got a real answer, and a retry with the same input would only get the
+    # same answer — so this is a business outcome, not a failure and not a recoverable condition.
+    - name: deposit-invalid
+      condition:
+        type: text
+        value: Opening deposit cannot be negative.
+      business_outcome: DEPOSIT_INVALID
+  retry:
+    max_attempts: 2
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+
+# The consequential step. Three things are true of it and of nothing else in this repo:
+#   - policy returns REQUIRE_HUMAN before it runs, unless a human has confirmed this step by name;
+#   - the schema forbids retry (max_attempts 1, safe false) — enforced, not merely intended;
+#   - an ambiguous response routes to `reconciliation` above, never back to this button.
+- id: submit-create
+  precondition:
+    type: page
+    name: sub-account-review
+    landmark:
+      strategies:
+      - type: accessibility
+        role: button
+        name: Create
+        exact: true
+      must_be_unique: true
+  action:
+    type: click
+  target:
+    strategies:
+    - type: accessibility
+      role: button
+      name: Create
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: created
+      condition:
+        type: text
+        value: Sub-Account Created
+  retry:
+    max_attempts: 1
+    safe: false
+  risk:
+    level: consequential_write
+    requires_confirmation: true
+provenance:
+  discovery_run_id: manual-bootstrap
+  model_id: not-applicable
+  timestamp: '2026-08-30T06:00:00Z'
+  operator: implementation-bootstrap
