@@ -1,0 +1,316 @@
+schema_version: '1.0'
+capability:
+  id: open-sub-account-review
+  version: 1.0.0
+  description: Reach the sub-account review screen without creating an account.
+approval_state: draft
+application:
+  family: meridian-cu
+  supported_versions:
+  - demo-v1
+  fingerprint:
+    route_patterns:
+    - /
+    - /member/:id
+    - /service/x4m9p/:member_id/:account_id
+    # Verified against the live entry screen before the first action, not asserted by the caller.
+    entry_landmarks:
+    - Member Search
+    - Member ID
+inputs:
+- name: member_id
+  type: string
+  description: Synthetic member reference.
+  required: true
+  sensitive: true
+  min_length: 5
+  max_length: 5
+  pattern: ^\d{5}$
+- name: account_type
+  type: enum
+  description: Type of sub-account to prepare.
+  required: true
+  sensitive: false
+  enum_values:
+  - savings
+  - money_market
+outputs:
+- name: member_name
+  type: string
+  description: Display name on the synthetic member record.
+  after_step: search-member
+  extraction:
+    strategies:
+    - type: relative
+      anchor: Member
+      role: cell
+      relation: same_row
+    must_be_unique: true
+  max_length: 100
+- name: current_balance
+  type: decimal
+  description: Current balance of the savings account.
+  # The account pane only exists on member detail; by the review screen the iframe is gone.
+  after_step: search-member
+  extraction:
+    frame: account-frame
+    strategies:
+    - type: relative
+      anchor: Savings Account
+      role: cell
+      relation: following_cell
+    must_be_unique: true
+# Known, recoverable screens this capability is permitted to dismiss. Anything not listed here is
+# an unexpected state and stops the run — replay never improvises its way past a screen.
+interstitials:
+- name: scheduled-maintenance
+  detect:
+    frame: account-frame
+    strategies:
+    - type: text
+      value: Scheduled maintenance
+      exact: true
+    must_be_unique: true
+  dismiss:
+    frame: account-frame
+    strategies:
+    - type: accessibility
+      role: link
+      name: Dismiss
+      exact: true
+    must_be_unique: true
+steps:
+- id: fill-member-id
+  precondition:
+    type: page
+    name: member-search
+    landmark:
+      strategies:
+      - type: accessibility
+        role: textbox
+        name: Member ID
+        exact: true
+      must_be_unique: true
+  action:
+    type: fill
+    value:
+      from_input: ${inputs.member_id}
+  target:
+    strategies:
+    - type: accessibility
+      role: textbox
+      name: Member ID
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: member-id-filled
+      condition:
+        type: page
+        name: member-search
+        landmark:
+          strategies:
+          - type: accessibility
+            role: button
+            name: Search
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 1
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: search-member
+  precondition:
+    type: page
+    name: member-search
+    landmark:
+      strategies:
+      - type: accessibility
+        role: button
+        name: Search
+        exact: true
+      must_be_unique: true
+  action:
+    type: click
+  target:
+    strategies:
+    - type: accessibility
+      role: button
+      name: Search
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    # The checkpoint is the servicing pane itself, not the page title. A member detail page that
+    # renders without an account pane has not reached a state this capability can continue from.
+    - name: member-found
+      condition:
+        type: page
+        name: member-detail
+        landmark:
+          frame: account-frame
+          strategies:
+          - type: text
+            value: Current balance
+            exact: true
+          must_be_unique: true
+    - name: member-not-found
+      condition:
+        type: text
+        value: No member matches the reference you entered.
+      business_outcome: MEMBER_NOT_FOUND
+    # The pane refuses sealed records with a "Permission denied" panel that is visually identical
+    # to the one shown when *our* operator role lacks the entitlement. Declaring only this one is
+    # what makes it a business outcome; the entitlement case is deliberately absent from this list
+    # and therefore surfaces as a system failure.
+    - name: member-restricted
+      condition:
+        type: text
+        value: This member record is restricted and cannot be serviced.
+      business_outcome: MEMBER_RESTRICTED
+    - name: session-expired
+      condition:
+        type: text
+        value: Sign in again to restore the authenticated session.
+      escalation: SESSION_EXPIRED
+  retry:
+    max_attempts: 2
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: open-sub-account-form
+  precondition:
+    type: page
+    name: member-detail
+    landmark:
+      strategies:
+      - type: text
+        value: Member Detail
+        exact: true
+      must_be_unique: true
+  action:
+    type: click
+  target:
+    frame: account-frame
+    # A ladder, most-semantic first. On a member with one account the plain accessible name is
+    # unique and wins. On a member with several, every row offers an identical "Open Sub-Account"
+    # link, so that rung is ambiguous, is recorded as such, and the row-anchored rung below it
+    # decides. Replay never picks between two matches — it falls through to something narrower.
+    strategies:
+    - type: accessibility
+      role: link
+      name: Open Sub-Account
+      exact: true
+    - type: relative
+      anchor: Savings Account
+      role: link
+      name: Open Sub-Account
+      relation: same_row
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: form-opened
+      condition:
+        type: page
+        name: sub-account-form
+        landmark:
+          strategies:
+          - type: accessibility
+            role: combobox
+            name: Account type
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 2
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: select-account-type
+  precondition:
+    type: page
+    name: sub-account-form
+    landmark:
+      strategies:
+      - type: accessibility
+        role: combobox
+        name: Account type
+        exact: true
+      must_be_unique: true
+  action:
+    type: select
+    value:
+      from_input: ${inputs.account_type}
+  target:
+    strategies:
+    - type: accessibility
+      role: combobox
+      name: Account type
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: selection-ready
+      condition:
+        type: page
+        name: sub-account-form
+        landmark:
+          strategies:
+          - type: accessibility
+            role: button
+            name: Continue to Review
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 1
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: continue-to-review
+  precondition:
+    type: page
+    name: sub-account-form
+    landmark:
+      strategies:
+      - type: accessibility
+        role: button
+        name: Continue to Review
+        exact: true
+      must_be_unique: true
+  action:
+    type: click
+  target:
+    strategies:
+    - type: accessibility
+      role: button
+      name: Continue to Review
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: review-reached
+      condition:
+        type: page
+        name: sub-account-review
+        landmark:
+          strategies:
+          - type: accessibility
+            role: button
+            name: Create
+            exact: true
+          must_be_unique: true
+  retry:
+    max_attempts: 2
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+provenance:
+  discovery_run_id: manual-bootstrap
+  model_id: not-applicable
+  timestamp: '2026-08-29T23:00:00Z'
+  operator: implementation-bootstrap

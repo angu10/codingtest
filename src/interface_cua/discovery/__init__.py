@@ -1,0 +1,2 @@
+"""Model-driven capability discovery."""
+

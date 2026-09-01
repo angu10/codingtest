@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Member Detail — Meridian CU{% endblock %}
+{% block body %}
+<h1>Member Detail</h1>
+<table class="tbl2">
+  <tr><th>Member</th><td>{{ member.name }}</td></tr>
+  <tr><th>Reference</th><td>•••{{ member_id[-4:] }}</td></tr>
+  <tr><td colspan="2">
+    <iframe name="account-frame" title="Member accounts" src="/account-pane/{{ member_id }}" width="900" height="390"></iframe>
+  </td></tr>
+</table>
+{% endblock %}
+

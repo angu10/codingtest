@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Review Sub-Account — Meridian CU{% endblock %}
+{% block body %}
+<h1>Review Sub-Account</h1>
+<table><tr><th>Member</th><td>{{ member.name }}</td></tr><tr><th>Account type</th><td>{{ review.account_type }}</td></tr><tr><th>Nickname</th><td>{{ review.nickname or "—" }}</td></tr><tr><th>Opening deposit</th><td>${{ review.opening_deposit }}</td></tr></table>
+<p class="c2">Creating the account is consequential and requires confirmation.</p>
+<form method="post" action="/service/q2c8v/create">
+  <input type="hidden" name="member_id" value="{{ member_id }}"><input type="hidden" name="account_id" value="{{ account.id }}">
+  <input type="hidden" name="account_type" value="{{ review.account_type }}"><input type="hidden" name="nickname" value="{{ review.nickname }}">
+  <input type="hidden" name="opening_deposit" value="{{ review.opening_deposit }}">
+  <button class="btn" type="submit">Create</button>
+</form>
+{% endblock %}
+

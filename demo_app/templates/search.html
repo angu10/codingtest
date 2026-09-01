@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Member Search — Meridian CU{% endblock %}
+{% block body %}
+<h1>Member Search</h1>
+<table class="tbl2"><tr><td class="c1">
+  <table><tr><td>
+    <form method="post" action="/lookup/r7q9x">
+      <label>Member ID <input name="member_id" inputmode="numeric" autocomplete="off" required></label>
+      <button class="btn" type="submit">Search</button>
+    </form>
+  </td></tr></table>
+</td></tr></table>
+{% endblock %}
+

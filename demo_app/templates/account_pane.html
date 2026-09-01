@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Accounts</title>
+<style>body{font:14px Arial;margin:8px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #888;padding:8px}.btn{background:#245b88;color:#fff;padding:6px 10px;text-decoration:none}.modal{border:4px solid #a66b00;background:#fff4d6;padding:12px}</style>
+</head><body>
+{% if show_modal %}
+<div class="modal" role="dialog" aria-label="Scheduled maintenance">
+  <h2>Scheduled maintenance</h2><p>Some reporting features may be temporarily unavailable.</p>
+  <a class="btn" href="/account-pane/{{ member_id }}?maintenance_dismissed=true">Dismiss</a>
+</div>
+{% else %}
+<h2>Accounts</h2>
+<table class="tbl2"><tr><td><table>
+  <tr><th>Account</th><th>Current balance</th><th>Action</th></tr>
+  {% for account in member.accounts %}
+  <tr>
+    <td>{{ account.kind }}</td><td>${{ account.balance }}</td>
+    <td><a class="btn" href="/service/x4m9p/{{ member_id }}/{{ account.id }}" target="_top">Open Sub-Account</a></td>
+  </tr>
+  {% endfor %}
+</table></td></tr></table>
+{% endif %}
+</body></html>
+

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{% block title %}Meridian CU Servicing Console{% endblock %}</title>
+    <style>
+      body { background:#d6d9dc; color:#18202a; font:14px Arial,sans-serif; margin:0; }
+      .top { background:#17324d; color:white; padding:12px 18px; }
+      .shell { background:white; border:1px solid #777; margin:18px auto; padding:18px; width:940px; }
+      table { border-collapse:collapse; width:100%; } td, th { border:1px solid #888; padding:8px; }
+      .c1 { background:#e9edf1; } .c2 { color:#821b1b; font-weight:bold; }
+      .btn { background:#245b88; border:1px solid #143a5b; color:white; cursor:pointer; padding:7px 12px; text-decoration:none; }
+      input, select { border:1px solid #666; padding:6px; } .modal { border:4px solid #a66b00; background:#fff4d6; padding:14px; }
+    </style>
+  </head>
+  <body>
+    <div class="top"><strong>MERIDIAN CU</strong> &nbsp; Servicing Console</div>
+    <div class="shell">{% block body %}{% endblock %}</div>
+  </body>
+</html>
+

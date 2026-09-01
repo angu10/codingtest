@@ -1,0 +1,951 @@
+{
+  "$defs": {
+    "AccessibilityStrategy": {
+      "additionalProperties": false,
+      "properties": {
+        "exact": {
+          "default": true,
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "type": {
+          "const": "accessibility",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "role",
+        "name"
+      ],
+      "title": "AccessibilityStrategy",
+      "type": "object"
+    },
+    "ActionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key"
+        },
+        "type": {
+          "enum": [
+            "click",
+            "fill",
+            "select",
+            "keypress",
+            "navigate",
+            "extract"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InputValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ActionSpec",
+      "type": "object"
+    },
+    "ApplicationFingerprint": {
+      "additionalProperties": false,
+      "description": "What replay checks before it touches anything, to know it is on the app it was authored for.\n\nBoth fields are verifiable at the capability's *entry point* \u2014 a fingerprint that could only be\nconfirmed halfway through the flow would be checked too late to prevent anything.",
+      "properties": {
+        "entry_landmarks": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Entry Landmarks",
+          "type": "array"
+        },
+        "route_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Route Patterns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "route_patterns",
+        "entry_landmarks"
+      ],
+      "title": "ApplicationFingerprint",
+      "type": "object"
+    },
+    "ApplicationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Family",
+          "type": "string"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/ApplicationFingerprint"
+        },
+        "supported_versions": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Supported Versions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "family",
+        "supported_versions",
+        "fingerprint"
+      ],
+      "title": "ApplicationSpec",
+      "type": "object"
+    },
+    "ApprovalState": {
+      "enum": [
+        "draft",
+        "approved"
+      ],
+      "title": "ApprovalState",
+      "type": "string"
+    },
+    "CapabilityIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "description"
+      ],
+      "title": "CapabilityIdentity",
+      "type": "object"
+    },
+    "InputSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "enum_values": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum Values"
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Length"
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Length"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pattern"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "sensitive": {
+          "default": false,
+          "title": "Sensitive",
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/$defs/ValueType"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "description"
+      ],
+      "title": "InputSpec",
+      "type": "object"
+    },
+    "InputValue": {
+      "additionalProperties": false,
+      "properties": {
+        "from_input": {
+          "title": "From Input",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_input"
+      ],
+      "title": "InputValue",
+      "type": "object"
+    },
+    "Interstitial": {
+      "additionalProperties": false,
+      "description": "A known, recoverable screen the capability is allowed to dismiss.\n\nDeclaring these keeps recovery inside the contract: replay dismisses only interstitials the\nartifact named, once each per step, and never improvises its way past an unexpected screen.",
+      "properties": {
+        "detect": {
+          "$ref": "#/$defs/TargetSpec"
+        },
+        "dismiss": {
+          "$ref": "#/$defs/TargetSpec"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "detect",
+        "dismiss"
+      ],
+      "title": "Interstitial",
+      "type": "object"
+    },
+    "OutputSpec": {
+      "additionalProperties": false,
+      "description": "A typed value the capability promises to return.\n\n``after_step`` pins extraction to the point in the flow where the value is actually on screen,\nwhich makes harvesting part of the decision graph rather than opportunistic scraping. A promised\noutput that cannot be extracted or coerced there is a failure, never a silently absent key.",
+      "properties": {
+        "after_step": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "After Step",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "enum_values": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum Values"
+        },
+        "extraction": {
+          "$ref": "#/$defs/TargetSpec"
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "maximum": 4000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Length"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/ValueType"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "description",
+        "after_step",
+        "extraction"
+      ],
+      "title": "OutputSpec",
+      "type": "object"
+    },
+    "PageCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "landmark": {
+          "$ref": "#/$defs/TargetSpec"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "const": "page",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "landmark"
+      ],
+      "title": "PageCondition",
+      "type": "object"
+    },
+    "Postcondition": {
+      "additionalProperties": false,
+      "properties": {
+        "any_of": {
+          "items": {
+            "$ref": "#/$defs/PostconditionBranch"
+          },
+          "minItems": 1,
+          "title": "Any Of",
+          "type": "array"
+        }
+      },
+      "required": [
+        "any_of"
+      ],
+      "title": "Postcondition",
+      "type": "object"
+    },
+    "PostconditionBranch": {
+      "additionalProperties": false,
+      "description": "One declared way a step is allowed to end.\n\nA branch with neither ``business_outcome`` nor ``escalation`` is a success branch. Anything the\ncapability does *not* declare here is a system failure by definition \u2014 that rule is what keeps\nthe business-outcome taxonomy a property of this contract rather than a judgement made by the\nexecutor over page copy.",
+      "properties": {
+        "business_outcome": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Business Outcome"
+        },
+        "condition": {
+          "discriminator": {
+            "mapping": {
+              "page": "#/$defs/PageCondition",
+              "route": "#/$defs/RouteCondition",
+              "target_state": "#/$defs/TargetStateCondition",
+              "text": "#/$defs/TextCondition"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PageCondition"
+            },
+            {
+              "$ref": "#/$defs/RouteCondition"
+            },
+            {
+              "$ref": "#/$defs/TargetStateCondition"
+            },
+            {
+              "$ref": "#/$defs/TextCondition"
+            }
+          ],
+          "title": "Condition"
+        },
+        "escalation": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "condition"
+      ],
+      "title": "PostconditionBranch",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "discovery_run_id": {
+          "minLength": 1,
+          "title": "Discovery Run Id",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "operator": {
+          "minLength": 1,
+          "title": "Operator",
+          "type": "string"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StabilitySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        }
+      },
+      "required": [
+        "discovery_run_id",
+        "model_id",
+        "timestamp",
+        "operator"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "RelativeStrategy": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {
+          "minLength": 1,
+          "title": "Anchor",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "relation": {
+          "default": "same_row",
+          "enum": [
+            "same_row",
+            "following_cell"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "type": {
+          "const": "relative",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "anchor",
+        "role"
+      ],
+      "title": "RelativeStrategy",
+      "type": "object"
+    },
+    "RetrySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "default": 1,
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "safe": {
+          "default": false,
+          "title": "Safe",
+          "type": "boolean"
+        }
+      },
+      "title": "RetrySpec",
+      "type": "object"
+    },
+    "RiskLevel": {
+      "enum": [
+        "read",
+        "reversible_write",
+        "consequential_write"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    },
+    "RiskSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/RiskLevel"
+        },
+        "requires_confirmation": {
+          "default": false,
+          "title": "Requires Confirmation",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "title": "RiskSpec",
+      "type": "object"
+    },
+    "RouteCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "type": "string"
+            }
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "pattern": {
+          "minLength": 1,
+          "title": "Pattern",
+          "type": "string"
+        },
+        "type": {
+          "const": "route",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "pattern"
+      ],
+      "title": "RouteCondition",
+      "type": "object"
+    },
+    "StabilitySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "expected": {
+          "minimum": 0,
+          "title": "Expected",
+          "type": "integer"
+        },
+        "runs": {
+          "minimum": 1,
+          "title": "Runs",
+          "type": "integer"
+        },
+        "scored_at": {
+          "format": "date-time",
+          "title": "Scored At",
+          "type": "string"
+        },
+        "unexpected": {
+          "minimum": 0,
+          "title": "Unexpected",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "runs",
+        "expected",
+        "unexpected",
+        "scored_at"
+      ],
+      "title": "StabilitySpec",
+      "type": "object"
+    },
+    "Step": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/ActionSpec"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "postcondition": {
+          "$ref": "#/$defs/Postcondition"
+        },
+        "precondition": {
+          "discriminator": {
+            "mapping": {
+              "page": "#/$defs/PageCondition",
+              "route": "#/$defs/RouteCondition",
+              "target_state": "#/$defs/TargetStateCondition",
+              "text": "#/$defs/TextCondition"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PageCondition"
+            },
+            {
+              "$ref": "#/$defs/RouteCondition"
+            },
+            {
+              "$ref": "#/$defs/TargetStateCondition"
+            },
+            {
+              "$ref": "#/$defs/TextCondition"
+            }
+          ],
+          "title": "Precondition"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetrySpec"
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskSpec"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "precondition",
+        "action",
+        "postcondition",
+        "risk"
+      ],
+      "title": "Step",
+      "type": "object"
+    },
+    "TargetSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "frame": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frame"
+        },
+        "must_be_unique": {
+          "const": true,
+          "default": true,
+          "title": "Must Be Unique",
+          "type": "boolean"
+        },
+        "strategies": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "accessibility": "#/$defs/AccessibilityStrategy",
+                "relative": "#/$defs/RelativeStrategy",
+                "text": "#/$defs/TextStrategy"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AccessibilityStrategy"
+              },
+              {
+                "$ref": "#/$defs/TextStrategy"
+              },
+              {
+                "$ref": "#/$defs/RelativeStrategy"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Strategies",
+          "type": "array"
+        }
+      },
+      "required": [
+        "strategies"
+      ],
+      "title": "TargetSpec",
+      "type": "object"
+    },
+    "TargetStateCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "visible",
+            "hidden",
+            "enabled",
+            "disabled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/TargetSpec"
+        },
+        "type": {
+          "const": "target_state",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "target",
+        "state"
+      ],
+      "title": "TargetStateCondition",
+      "type": "object"
+    },
+    "TextCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "text",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "TextCondition",
+      "type": "object"
+    },
+    "TextStrategy": {
+      "additionalProperties": false,
+      "properties": {
+        "exact": {
+          "default": true,
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "text",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "TextStrategy",
+      "type": "object"
+    },
+    "ValueType": {
+      "enum": [
+        "string",
+        "integer",
+        "decimal",
+        "boolean",
+        "enum"
+      ],
+      "title": "ValueType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "application": {
+      "$ref": "#/$defs/ApplicationSpec"
+    },
+    "approval_state": {
+      "$ref": "#/$defs/ApprovalState",
+      "default": "draft"
+    },
+    "capability": {
+      "$ref": "#/$defs/CapabilityIdentity"
+    },
+    "inputs": {
+      "items": {
+        "$ref": "#/$defs/InputSpec"
+      },
+      "minItems": 1,
+      "title": "Inputs",
+      "type": "array"
+    },
+    "interstitials": {
+      "items": {
+        "$ref": "#/$defs/Interstitial"
+      },
+      "title": "Interstitials",
+      "type": "array"
+    },
+    "outputs": {
+      "items": {
+        "$ref": "#/$defs/OutputSpec"
+      },
+      "title": "Outputs",
+      "type": "array"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "capability",
+    "application",
+    "inputs",
+    "steps",
+    "provenance"
+  ],
+  "title": "Capability",
+  "type": "object"
+}
