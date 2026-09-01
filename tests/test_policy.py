@@ -115,6 +115,20 @@ def test_a_value_too_short_to_mask_is_redacted_whole() -> None:
     assert result.value["pin"] == "[redacted]"  # four digits: last-4 is all of it
 
 
+def test_the_length_guard_also_applies_to_values_found_outside_their_own_field() -> None:
+    """The same rule, on the path that finds a value by matching rather than by field name.
+
+    Field-name masking and value masking are the same control applied twice, and only one of them
+    used to check the length. A short value quoted inside a URL or an error message came back
+    whole.
+    """
+
+    redactor = Redactor(set(), sensitive_values=frozenset({"4821", "58431"}))
+    result = redactor.redact({"url": "/member/58431/pin/4821"})
+    assert "4821" not in result.value["url"], result.value["url"]
+    assert result.value["url"] == "/member/***8431/pin/[redacted]"
+
+
 def test_extraction_of_regulated_data_is_denied_unless_explicitly_allowed() -> None:
     """Reading a value out is the only action whose risk comes from the screen, not the step."""
 

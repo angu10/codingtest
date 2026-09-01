@@ -114,9 +114,12 @@ class Redactor:
         return value
 
     def _mask_values(self, text: str) -> str:
+        # Through `_mask_span` rather than formatting inline: this is the third place the same
+        # masking rule is applied, and it is the one that used to skip the length guard. A
+        # four-character value came back as `***` plus the whole value.
         for secret in self.sensitive_values:
             if secret in text:
-                text = text.replace(secret, f"***{secret[-4:]}")
+                text = text.replace(secret, _mask_span(secret))
         return text
 
     def _mask_residue(self, text: str, gaps: set[str]) -> str:

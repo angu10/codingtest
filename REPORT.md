@@ -209,9 +209,11 @@ shape of the screen, not whose record it is. A route condition bound to the memb
 
 ## 6. Safety
 
-Policy is a fail-closed allowlist of origins, action types, and blocked routes. A navigation is
-judged by where it is going and not only where it is, since checking the current page would
-authorise wherever the session already sits. The reconciliation probe goes through the same call.
+Policy is a fail-closed allowlist of origins, action types, and blocked routes. A `navigate` action
+is judged by where it is going and not only by where it is, since checking the current page would
+authorise wherever the session already sits. The reconciliation probe goes through the same call. A
+click that happens to navigate is judged on the page it starts from; re-checking the URL after every
+action, not just before an explicit navigate, is the obvious next tightening.
 
 Every action carries one of three risk levels: read, reversible write, consequential write. A
 consequential write stops for a human unless someone confirmed that specific step by name. I chose
@@ -286,6 +288,10 @@ Known limits rather than cuts:
   replays only for the member it was discovered on. What replay does with it is the point: it reaches
   the right page for a different member and still refuses to call it success.
 - Identity is not rebound after a handoff, as described under escalation above.
+- The operator console can Resume or Abort. It cannot approve. A consequential write still needs
+  `--confirm` on the command line, so the real answer to "a human must authorise this write" is
+  currently "stop the run and start it again with a flag". That is the first thing I would fix: it
+  is the one gap that makes a path unusable rather than merely incomplete.
 
 Next, in order: the capability catalogue, so an agent can invoke capabilities by name with typed
 arguments; stability scoring wired to the approval gate; and a second branded variant of the same
