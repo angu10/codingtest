@@ -21,3 +21,7 @@ httpx>=0.28,<1
 pytest>=8.4,<9
 pytest-asyncio>=1.1,<2
 ruff>=0.12,<1
+
+# The project itself. `src/` layout means the package is not importable from the repo root
+# until it is installed, so without this line every test fails to collect on a fresh clone.
+-e .
