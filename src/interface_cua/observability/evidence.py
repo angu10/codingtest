@@ -37,11 +37,19 @@ class EvidenceWriter:
     cannot carry it.
     """
 
-    def __init__(self, root: Path | str, run_id: str, redactor: Redactor | None = None) -> None:
+    def __init__(
+        self,
+        root: Path | str,
+        run_id: str,
+        redactor: Redactor | None = None,
+        sensitive_values: frozenset[str] = frozenset(),
+    ) -> None:
         self.run_id = run_id
         self.dir = Path(root) / run_id
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.redactor = redactor or Redactor(DEFAULT_SENSITIVE_FIELDS)
+        self.redactor = redactor or Redactor(
+            DEFAULT_SENSITIVE_FIELDS, sensitive_values=sensitive_values
+        )
         self.events = EventLog(self.dir / "events.jsonl", run_id, self.redactor)
 
     def emit(self, event: RunEvent | Notice) -> None:

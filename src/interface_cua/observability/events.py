@@ -126,6 +126,8 @@ class NoticeKind(StrEnum):
     STEP_RETRIED = "STEP_RETRIED"
     #: Untrusted page text tripped the scanner *before* it entered model context (discovery only).
     CONTENT_RISK_FLAGGED = "CONTENT_RISK_FLAGGED"
+    #: A model coordinate landed outside any control and was snapped to the nearest one.
+    CLICK_SNAPPED = "CLICK_SNAPPED"
 
 
 class Notice(StrictEvent):

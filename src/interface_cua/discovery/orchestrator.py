@@ -11,6 +11,7 @@ observations. Any of them ending the run is a normal outcome, not an error.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -36,12 +37,15 @@ from interface_cua.policy.content_scanner import (
     HeuristicContentRiskScanner,
 )
 from interface_cua.policy.engine import AuthorizationContext, PolicyEngine, PolicyVerdict
-from interface_cua.schema.artifact import ActionSpec, RiskLevel, RiskSpec
+from interface_cua.schema.artifact import ActionSpec, InputValue, RiskLevel, RiskSpec
 
 MAX_STEPS = 25
 WALL_CLOCK_SECONDS = 180.0
 #: How many identical observations in a row before we call it a loop.
 LOOP_THRESHOLD = 3
+#: How long to let a URL stop moving before recording where an action landed.
+URL_SETTLE_SECONDS = 3.0
+URL_POLL_SECONDS = 0.15
 
 
 class DiscoveryOutcome(StrEnum):
@@ -67,12 +71,25 @@ class RecordedStep:
 
 
 @dataclass(slots=True)
+class RecordedOutput:
+    """A value the model named, plus how to find it again on a later run."""
+
+    name: str
+    #: Kept only so the compiler can infer the type. Never written into the artifact.
+    observed_value: str
+    target: RecordedTarget | None
+    #: The URL the value was visible on. The compiler pins extraction to the step that lands
+    #: here — an output read on member detail cannot be re-read from the form page.
+    captured_at_url: str
+
+
+@dataclass(slots=True)
 class DiscoveryRun:
     run_id: str
     goal: str
     outcome: DiscoveryOutcome
     steps: list[RecordedStep] = field(default_factory=list)
-    outputs: dict[str, str] = field(default_factory=dict)
+    outputs: dict[str, RecordedOutput] = field(default_factory=dict)
     detail: str | None = None
 
 
@@ -130,16 +147,21 @@ class DiscoveryOrchestrator:
                 return result
 
             observation, digest = await self._observe()
-            recent.append(digest)
-            if _looping(recent):
-                result.outcome = DiscoveryOutcome.LOOP_DETECTED
-                result.detail = "the same screen came back unchanged; the model is not progressing"
-                return result
-
             turn = await self.model.propose(observation)
             if not turn.actions:
                 result.outcome = DiscoveryOutcome.NO_ACTION
                 result.detail = "model proposed nothing"
+                return result
+
+            # A loop is the same screen *and* the same response to it. Screen alone is too coarse:
+            # focus a field, type into it, submit — three turns on a page whose text never changes,
+            # which is ordinary progress, not a loop.
+            recent.append(f"{digest}|{_signature(turn.actions)}")
+            if _looping(recent):
+                result.outcome = DiscoveryOutcome.LOOP_DETECTED
+                result.detail = (
+                    "the model kept answering an unchanged screen the same way; not progressing"
+                )
                 return result
 
             tool_results: list[dict[str, Any]] = []
@@ -173,12 +195,20 @@ class DiscoveryOrchestrator:
             return DiscoveryOutcome.ESCALATED
         if action.kind == "extract":
             if action.output_name and action.text is not None:
-                result.outputs[action.output_name] = action.text
+                # Anchor the output the same way a click is anchored. The model tells us the
+                # value; only the page can tell us how to find it again next run — storing the
+                # value itself would bake this run's data into the capability.
+                result.outputs[action.output_name] = RecordedOutput(
+                    name=action.output_name,
+                    observed_value=action.text,
+                    target=await self._locate_text(action.text),
+                    captured_at_url=self.surface.current_url,
+                )
             tool_results.append(_ok(action, "recorded"))
             return None
 
         decision = self.policy.authorize(
-            ActionSpec(type=_POLICY_ACTION.get(action.kind, "click")),  # type: ignore[arg-type]
+            _policy_action(action.kind),
             RiskSpec(
                 level=_RISK_BY_ACTION.get(action.kind, RiskLevel.REVERSIBLE_WRITE),
                 requires_confirmation=False,
@@ -201,8 +231,15 @@ class DiscoveryOrchestrator:
             if action.kind == "click" and action.x is not None and action.y is not None
             else None
         )
-        await self._act(action)
-        url_after = self.surface.current_url
+        if target is not None and target.snapped:
+            self.evidence.notice(
+                NoticeKind.CLICK_SNAPPED,
+                requested=[action.x, action.y],
+                actuated=list(target.point),
+                control=target.accessible_name,
+            )
+        await self._act(action, target)
+        url_after = await self._settled_url()
 
         result.steps.append(
             RecordedStep(
@@ -218,10 +255,59 @@ class DiscoveryOrchestrator:
         tool_results.append(_ok(action, "done"))
         return None
 
-    async def _act(self, action: ModelAction) -> None:
+    async def _settled_url(self) -> str:
+        """Where the action actually landed.
+
+        A form POST answered with a 303 has not reached its destination when the current document
+        finishes loading, so reading the URL immediately records the page we came *from*. The
+        compiler canonicalises routes from these values, so getting it wrong would bake the wrong
+        pattern into the artifact. Polls until the URL holds still.
+        """
+
+        previous = self.surface.current_url
+        deadline = time.monotonic() + URL_SETTLE_SECONDS
+        while time.monotonic() < deadline:
+            await asyncio.sleep(URL_POLL_SECONDS)
+            current = self.surface.current_url
+            if current == previous:
+                return current
+            previous = current
+        return previous
+
+    async def _locate_text(self, value: str) -> RecordedTarget | None:
+        """Find where a value the model reported is actually rendered, and describe that point."""
+
+        page = self.recorder.page
+        # Exact first, then substring: the model reports the value it read ("9876.54") while the
+        # page renders it decorated ("$9876.54"). Requiring an exact match would silently drop
+        # most real outputs.
+        for frame, exact in [(f, e) for e in (True, False) for f in [page, *page.frames]]:
+            try:
+                locator = frame.get_by_text(value, exact=exact).first
+                if await locator.count() == 0:
+                    continue
+                # Short timeout: this is a best-effort anchor, not a checkpoint. If the value is
+                # not stably visible we record the output without a target and the compiler skips
+                # it, which is better than stalling discovery for 30s per miss.
+                box = await locator.bounding_box(timeout=2_000)
+            except Exception:  # noqa: BLE001, S112 - a detached/cross-origin frame is a miss
+                continue
+            if box:
+                return await self.recorder.describe_point(
+                    int(box["x"] + box["width"] / 2),
+                    int(box["y"] + box["height"] / 2),
+                    avoid_text=value,
+                )
+        return None
+
+    async def _act(self, action: ModelAction, target: RecordedTarget | None = None) -> None:
         page = self.recorder.page
         if action.kind == "click" and action.x is not None and action.y is not None:
-            await page.mouse.click(action.x, action.y)
+            # Click the control the recorder resolved, not the raw estimate. The model picks
+            # *which* control; the page decides where it is. Without this, a coordinate tens of
+            # pixels off actuates a container and the run stalls with nothing appearing to happen.
+            x, y = target.point if target is not None else (action.x, action.y)
+            await page.mouse.click(x, y)
         elif action.kind == "type" and action.text:
             await page.keyboard.type(action.text)
         elif action.kind == "key" and action.text:
@@ -286,8 +372,30 @@ def _target_event(target: RecordedTarget) -> TargetEvent:
     )
 
 
+#: Placeholder reference for the policy probe below. Discovery has no artifact yet, so there is no
+#: real input to point at — and `authorize` only reads `action.type`.
+_PROBE_VALUE = InputValue(from_input="${inputs.discovery_probe}")
+
+
+def _policy_action(kind: str) -> ActionSpec:
+    """A schema-valid `ActionSpec` to ask policy about, without inventing an artifact."""
+
+    action_type = _POLICY_ACTION.get(kind, "click")
+    if action_type == "fill":
+        return ActionSpec(type="fill", value=_PROBE_VALUE)
+    if action_type == "keypress":
+        return ActionSpec(type="keypress", key="Enter")
+    return ActionSpec(type=action_type)  # type: ignore[arg-type]
+
+
 def _ok(action: ModelAction, message: str) -> dict[str, Any]:
     return {"type": "tool_result", "tool_use_id": action.tool_use_id, "content": message}
+
+
+def _signature(actions: tuple[ModelAction, ...]) -> str:
+    """What the model chose to do, ignoring identity — two clicks on the same spot match."""
+
+    return ";".join(f"{a.kind}:{a.x},{a.y}:{a.text or ''}" for a in actions)
 
 
 def _looping(recent: list[str]) -> bool:

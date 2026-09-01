@@ -1,0 +1,160 @@
+schema_version: '1.0'
+capability:
+  id: discovered-open-sub-account
+  version: 1.0.0
+  description: For member 58431, open the savings sub-account form. Return the member
+    name and the current balance of the Savings Account.
+approval_state: draft
+application:
+  family: meridian-cu
+  supported_versions:
+  - demo-v1
+  fingerprint:
+    route_patterns:
+    - /
+    - /member/:member_id
+    - /service/x4m9p/:member_id/sav-42
+    entry_landmarks:
+    - Member Search
+inputs:
+- name: member_id
+  type: string
+  description: Discovered from a run using a 5-digit reference.
+  required: true
+  sensitive: true
+  min_length: 5
+  max_length: 5
+  pattern: ^\d{5}$
+outputs:
+- name: member_name
+  type: string
+  description: Captured during discovery from the page.
+  after_step: search-1
+  extraction:
+    strategies:
+    - type: relative
+      anchor: Member
+      role: cell
+      relation: following_cell
+    must_be_unique: true
+  max_length: 200
+- name: savings_current_balance
+  type: decimal
+  description: Captured during discovery from the page.
+  after_step: search-1
+  extraction:
+    frame: account-frame
+    strategies:
+    - type: relative
+      anchor: Savings Account
+      role: cell
+      relation: following_cell
+    must_be_unique: true
+interstitials: []
+steps:
+- id: member-id-0
+  precondition:
+    type: route
+    pattern: /
+    bindings: {}
+  action:
+    type: fill
+    value:
+      from_input: ${inputs.member_id}
+  target:
+    strategies:
+    - type: accessibility
+      role: textbox
+      name: Member ID
+      exact: true
+    - type: text
+      value: Member ID
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: step-completed
+      condition:
+        type: route
+        pattern: /
+        bindings: {}
+  retry:
+    max_attempts: 1
+    safe: true
+  risk:
+    level: read
+    requires_confirmation: false
+- id: search-1
+  precondition:
+    type: route
+    pattern: /
+    bindings: {}
+  action:
+    type: click
+  target:
+    strategies:
+    - type: accessibility
+      role: button
+      name: Search
+      exact: true
+    - type: text
+      value: Search
+      exact: true
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: step-completed
+      condition:
+        type: route
+        pattern: /member/:member_id
+        bindings:
+          member_id: ${inputs.member_id}
+  retry:
+    max_attempts: 1
+    safe: false
+  risk:
+    level: reversible_write
+    requires_confirmation: false
+- id: open-sub-account-2
+  precondition:
+    type: route
+    pattern: /member/:member_id
+    bindings:
+      member_id: ${inputs.member_id}
+  action:
+    type: click
+  target:
+    frame: account-frame
+    strategies:
+    - type: accessibility
+      role: link
+      name: Open Sub-Account
+      exact: true
+    - type: text
+      value: Open Sub-Account
+      exact: true
+    - type: relative
+      anchor: Savings Account
+      role: link
+      name: Open Sub-Account
+      relation: same_row
+    must_be_unique: true
+  postcondition:
+    any_of:
+    - name: step-completed
+      condition:
+        type: route
+        pattern: /service/x4m9p/:member_id/sav-42
+        bindings:
+          member_id: ${inputs.member_id}
+  retry:
+    max_attempts: 1
+    safe: false
+  risk:
+    level: reversible_write
+    requires_confirmation: false
+provenance:
+  discovery_run_id: disc-live-03
+  model_id: claude-opus-5
+  timestamp: '2026-08-30T05:16:06.573849Z'
+  operator: discovery-cli

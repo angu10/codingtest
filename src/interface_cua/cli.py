@@ -72,7 +72,11 @@ async def replay(args: argparse.Namespace) -> ReplayResult:
 
         evidence = None
         if args.evidence is not None:
-            evidence = EvidenceWriter(args.evidence, run_id)
+            evidence = EvidenceWriter(
+                args.evidence,
+                run_id,
+                sensitive_values=frozenset(str(v) for v in arguments.values()),
+            )
             await surface.start_trace()
 
         await page.goto(args.base_url)
@@ -93,9 +97,88 @@ async def replay(args: argparse.Namespace) -> ReplayResult:
         return result
 
 
+async def discover(args: argparse.Namespace) -> int:
+    """Drive the app with a real model, then compile what it did into a draft artifact.
+
+    This is the only command that needs an API key. Everything it produces — the artifact, the
+    events, the screenshots — is then usable with no model at all.
+    """
+
+    from interface_cua.discovery.compiler import compile_run
+    from interface_cua.discovery.model import MODEL_ID, ClaudeDiscoveryModel
+    from interface_cua.discovery.orchestrator import DiscoveryOrchestrator, DiscoveryOutcome
+
+    inputs = dict(pair.split("=", 1) for pair in args.input)
+    run_id = args.run_id or f"disc_{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+    evidence = EvidenceWriter(
+        args.evidence, run_id, sensitive_values=frozenset(inputs.values())
+    )
+
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=not args.headed)
+        page = await browser.new_page(viewport={"width": VIEWPORT[0], "height": VIEWPORT[1]})
+        await page.goto(args.base_url)
+        surface = PlaywrightSurface(page, SessionLease())
+        await surface.start_trace()
+
+        orchestrator = DiscoveryOrchestrator(
+            surface=surface,
+            page=page,
+            model=ClaudeDiscoveryModel(viewport=VIEWPORT, goal=args.goal),
+            policy=PolicyEngine(
+                PolicyConfig(allowed_origins=frozenset({args.base_url.rstrip("/")}))
+            ),
+            evidence=evidence,
+            goal=args.goal,
+            max_steps=args.max_steps,
+        )
+        try:
+            run = await orchestrator.run()
+        finally:
+            await surface.save_trace(evidence.dir / "trace.zip")
+            await browser.close()
+
+    print(f"outcome: {run.outcome.value}  steps: {len(run.steps)}  detail: {run.detail}")
+    print(f"evidence: {evidence.dir}")
+    if run.outcome is not DiscoveryOutcome.FINISHED:
+        print("not compiling: only a finished run becomes a capability", file=sys.stderr)
+        return 1
+
+    artifact = compile_run(
+        run,
+        capability_id=args.capability_id,
+        description=args.goal,
+        inputs=inputs,
+        application_family=args.family,
+        application_version=args.app_version,
+        entry_landmarks=args.landmark or ["Member Search"],
+        model_id=MODEL_ID,
+        operator=args.operator,
+    )
+    artifact.to_yaml(args.out)
+    print(f"artifact: {args.out}  (draft — a human declares outcomes and risk before approval)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="interface-cua", description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
+
+    find = subcommands.add_parser("discover", help="Drive the app with a model and compile it.")
+    find.add_argument("--goal", required=True)
+    find.add_argument("--input", action="append", default=[], metavar="NAME=VALUE")
+    find.add_argument("--out", type=Path, required=True, help="Where to write the artifact.")
+    find.add_argument("--capability-id", default="discovered-capability")
+    find.add_argument("--base-url", default="http://127.0.0.1:8000")
+    find.add_argument("--family", default="meridian-cu")
+    find.add_argument("--app-version", default="demo-v1")
+    find.add_argument("--landmark", action="append", default=[])
+    find.add_argument("--evidence", type=Path, default=Path("evidence"))
+    find.add_argument("--run-id", default=None)
+    find.add_argument("--operator", default="discovery-cli")
+    find.add_argument("--max-steps", type=int, default=25)
+    find.add_argument("--headed", action="store_true")
+    find.set_defaults(handler=discover, discovery=True)
 
     run = subcommands.add_parser("replay", help="Replay a capability artifact deterministically.")
     run.add_argument("artifact", type=Path, help="Path to a capability YAML artifact.")
@@ -132,10 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    result = asyncio.run(args.handler(args))
-    json.dump(result.model_dump(mode="json"), sys.stdout, indent=2)
+    outcome = asyncio.run(args.handler(args))
+    if getattr(args, "discovery", False):
+        return int(outcome)
+    json.dump(outcome.model_dump(mode="json"), sys.stdout, indent=2)
     sys.stdout.write("\n")
-    return EXIT_CODES[result.status]
+    return EXIT_CODES[outcome.status]
 
 
 if __name__ == "__main__":

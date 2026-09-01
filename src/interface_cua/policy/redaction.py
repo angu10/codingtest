@@ -45,10 +45,18 @@ class Redactor:
     """Mask declared sensitive keys before scanning any remaining free text."""
 
     def __init__(
-        self, sensitive_fields: AbstractSet[str], scanner: PIIScanner | None = None
+        self,
+        sensitive_fields: AbstractSet[str],
+        scanner: PIIScanner | None = None,
+        sensitive_values: AbstractSet[str] = frozenset(),
     ) -> None:
         self.sensitive_fields = sensitive_fields
         self.scanner = scanner or RegexPIIScanner()
+        # Masking by field name alone is not enough: a member id also travels inside a URL, a
+        # page title, or a postcondition string, where no field is named after it. Callers that
+        # know the run's actual input values pass them here so they are masked wherever they
+        # appear — which is what invariant 7 requires of a log.
+        self.sensitive_values = frozenset(v for v in sensitive_values if len(v) >= 3)
 
     def redact(self, value: Any) -> RedactionResult:
         masked = self._mask(value, field_name=None)
@@ -64,7 +72,15 @@ class Redactor:
             return [self._mask(item, field_name) for item in value]
         if isinstance(value, tuple):
             return tuple(self._mask(item, field_name) for item in value)
+        if isinstance(value, str):
+            return self._mask_values(value)
         return value
+
+    def _mask_values(self, text: str) -> str:
+        for secret in self.sensitive_values:
+            if secret in text:
+                text = text.replace(secret, f"***{secret[-4:]}")
+        return text
 
 
 def _mask_sensitive(field_name: str, value: Any) -> str:

@@ -105,9 +105,20 @@ class PlaywrightSurface:
         # state the step actually needs. Postconditions do the real waiting, against conditions
         # the artifact declared.
         await self.page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+        # Child frames too. On this app the account pane *is* the content, so a main frame that
+        # has loaded while its iframe has not is not settled in any useful sense — and a
+        # page-level screenshot blocks on every frame, so skipping this hangs the capture.
+        for frame in self.page.frames:
+            if frame is self.page.main_frame:
+                continue
+            try:
+                await frame.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+            except PlaywrightError:
+                continue  # detached mid-wait; the postcondition is what actually decides
 
-    async def screenshot(self) -> bytes:
-        payload = await self.page.screenshot(type="png")
+    async def screenshot(self, timeout_ms: int = 10_000) -> bytes:
+        # Bounded: a page that never settles must fail the step, not stall the whole run.
+        payload = await self.page.screenshot(type="png", timeout=timeout_ms)
         width, height = struct.unpack(">II", payload[16:24])
         if (width, height) != VIEWPORT:
             raise RuntimeError(

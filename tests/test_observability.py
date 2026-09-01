@@ -83,6 +83,32 @@ def test_event_log_masks_a_sensitive_value_and_keeps_its_last_four(tmp_path: Pat
     assert redacted.value["note"] == "fine"
 
 
+def test_a_sensitive_value_is_masked_even_where_no_field_is_named_after_it(
+    tmp_path: Path,
+) -> None:
+    """Found by the leak check on a real discovery run.
+
+    A member id also travels inside URLs and postcondition strings, where field-name masking never
+    looks. Invariant 7 is about the log, not about a naming convention, so the run's actual input
+    values are masked wherever they appear.
+    """
+
+    log = EventLog(
+        tmp_path / "events.jsonl",
+        "run-1",
+        Redactor(DEFAULT_SENSITIVE_FIELDS, sensitive_values=frozenset({"58431"})),
+    )
+    log.emit(
+        _event(
+            observation=Observation(url="http://127.0.0.1:8000/member/58431"),
+            result=StepResult(ok=True, elapsed_ms=1, postcondition="landed on /member/58431"),
+        )
+    )
+    written = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert "58431" not in written
+    assert "***8431" in written
+
+
 def test_unexpected_pii_raises_a_schema_gap_notice_rather_than_being_cleaned_up(
     tmp_path: Path,
 ) -> None:

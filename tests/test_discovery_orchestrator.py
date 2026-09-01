@@ -88,7 +88,8 @@ async def test_finish_ends_the_run_and_keeps_extracted_outputs(demo_server, tmp_
     run, _ = await _run(demo_server, tmp_path, model)
     assert run.outcome is DiscoveryOutcome.FINISHED
     assert run.detail == "review screen reached"
-    assert run.outputs == {"member_name": "Morgan Chen"}
+    assert set(run.outputs) == {"member_name"}
+    assert run.outputs["member_name"].observed_value == "Morgan Chen"
 
 
 async def test_escalate_is_a_normal_outcome_not_an_error(demo_server, tmp_path: Path) -> None:
